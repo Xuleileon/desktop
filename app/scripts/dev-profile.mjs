@@ -344,7 +344,7 @@ function printDoctorResult(opts, result) {
 
 function usage() {
   console.log(`Usage:
-  node scripts/dev-profile.mjs path [--name <branch-or-name>] [--json]
+  node scripts/dev-profile.mjs path [--name <branch-or-name>] [--target <ref>] [--json]
   node scripts/dev-profile.mjs copy [--from <ref>] [--to <ref>] [--force] [--db-only]
   node scripts/dev-profile.mjs doctor [--target <ref>] [--json]
   node scripts/dev-profile.mjs clean [--target <ref>] [--force]
@@ -365,8 +365,9 @@ async function main() {
   const productName = readProductName();
 
   if (command === 'path') {
-    const path = resolveProfileRef(opts.name, productName);
-    printResult(opts, { path, name: opts.name ?? currentBranchName() });
+    const ref = opts.target ?? opts.name;
+    const path = resolveProfileRef(ref, productName);
+    printResult(opts, { path, name: ref ?? currentBranchName() });
     return;
   }
 

@@ -145,6 +145,7 @@ import {
   stopResourceMonitor,
   type ResourceMonitorContext,
 } from './resourceMonitor';
+import { startActivityTracker, stopActivityTracker } from './activityTracker';
 // Channels (WhatsApp)
 import { WhatsAppAdapter } from './channels/WhatsAppAdapter';
 import { ChannelRouter } from './channels/ChannelRouter';
@@ -437,6 +438,9 @@ app.whenReady().then(async () => {
   registerBrowserIdentityHeaders();
   registerChatfileHandler();
   startResourceMonitor(resourceMonitorContext);
+  startActivityTracker({
+    userDataPath: app.getPath('userData'),
+  });
 
   // Verify the CDP endpoint at our announced port is actually OUR app
   // instance and not, e.g., the user's own Chrome that happened to already
@@ -2033,6 +2037,7 @@ app.whenReady().then(async () => {
     }
     activeAgents.clear();
     browserPool.destroyAll(shellWindow ?? undefined);
+    stopActivityTracker();
     stopResourceMonitor();
     sessionManager.destroy();
     whatsAppAdapter.disconnect().catch(() => {});

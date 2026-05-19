@@ -99,6 +99,67 @@ tasks:
           TARGET="$TARGET" ALLOW_RUNNING="$ALLOW_RUNNING" node app/scripts/dev-profile.mjs doctor
         fi
 
+  activity:path:
+    desc: Print the active app activity tracker JSONL path
+    silent: true
+    cmds:
+      - |
+        FILE_ARG="{{default "" .FILE}}"
+        NAME="{{default "" .NAME}}"
+        TARGET="{{default "" .TARGET}}"
+        FILE="${FILE_ARG:-${ACTIVITY_FILE:-${FILE:-}}}"
+        if [ -z "$FILE" ]; then
+          if [ -n "$AGB_USER_DATA_DIR" ]; then
+            PROFILE="$AGB_USER_DATA_DIR"
+          elif [ -n "$TARGET" ]; then
+            PROFILE="$(node app/scripts/dev-profile.mjs path --target "$TARGET")"
+          elif [ -n "$NAME" ]; then
+            PROFILE="$(node app/scripts/dev-profile.mjs path --name "$NAME")"
+          else
+            PROFILE="$(node app/scripts/dev-profile.mjs path)"
+          fi
+          FILE="$PROFILE/activity/activity-events.jsonl"
+        fi
+        printf '%s\n' "$FILE"
+
+  activity:stream:
+    desc: Stream raw active app activity events, e.g. task activity:stream LINES=20
+    silent: true
+    cmds:
+      - |
+        FILE_ARG="{{default "" .FILE}}"
+        NAME="{{default "" .NAME}}"
+        TARGET="{{default "" .TARGET}}"
+        LINES_ARG="{{default "" .LINES}}"
+        FILE="${FILE_ARG:-${ACTIVITY_FILE:-${FILE:-}}}"
+        if [ -z "$FILE" ]; then
+          if [ -n "$AGB_USER_DATA_DIR" ]; then
+            PROFILE="$AGB_USER_DATA_DIR"
+          elif [ -n "$TARGET" ]; then
+            PROFILE="$(node app/scripts/dev-profile.mjs path --target "$TARGET")"
+          elif [ -n "$NAME" ]; then
+            PROFILE="$(node app/scripts/dev-profile.mjs path --name "$NAME")"
+          else
+            PROFILE="$(node app/scripts/dev-profile.mjs path)"
+          fi
+          FILE="$PROFILE/activity/activity-events.jsonl"
+        fi
+        mkdir -p "$(dirname "$FILE")"
+        touch "$FILE"
+        echo "Streaming $FILE"
+        tail -n "${LINES_ARG:-${LINES:-50}}" -F "$FILE"
+
+  activity:tail:
+    desc: Alias for activity:stream
+    silent: true
+    cmds:
+      - task: activity:stream
+        vars:
+          FILE: "{{default \"\" .FILE}}"
+          NAME: "{{default \"\" .NAME}}"
+          TARGET: "{{default \"\" .TARGET}}"
+          LINES: "{{default \"\" .LINES}}"
+
   windows:node:check:
     desc: "Windows: verify local development is using Node 20.x or 22.x"
     platforms: [windows]
