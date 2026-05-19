@@ -3373,6 +3373,19 @@ button:focus:not(:focus-visible) {
   border-bottom: 1px solid var(--color-border-subtle);
 }
 
+.activity-card__actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.activity-card__actions .settings-pane__segment {
+  min-width: 56px;
+  padding: 0 var(--space-3);
+}
+
 .activity-card__metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3456,7 +3469,8 @@ button:focus:not(:focus-visible) {
 }
 
 .activity-donut__slice:hover,
-.activity-donut__slice:focus-visible {
+.activity-donut__slice:focus-visible,
+.activity-donut__slice--active {
   filter: brightness(1.08) saturate(1.08);
   stroke: var(--color-fg-primary);
   stroke-width: 2;
@@ -3632,11 +3646,12 @@ button:focus:not(:focus-visible) {
 
 .activity-week-chart {
   display: grid;
-  grid-template-columns: repeat(7, minmax(44px, 1fr));
+  grid-template-columns: repeat(var(--activity-day-count, 7), minmax(24px, 1fr));
   align-items: end;
   gap: var(--space-3);
   min-height: 250px;
   padding: var(--space-5) var(--space-5) var(--space-4);
+  overflow-x: auto;
 }
 
 .activity-day {
@@ -3730,6 +3745,17 @@ button:focus:not(:focus-visible) {
 
   .activity-card__metrics {
     grid-template-columns: 1fr;
+  }
+
+  .activity-card__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .activity-card__actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: space-between;
   }
 
   .activity-card__metrics > div {

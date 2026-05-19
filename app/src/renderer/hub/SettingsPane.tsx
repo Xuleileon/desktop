@@ -255,6 +255,12 @@ const ACTIVITY_APP_COLORS = [
   '#fb7185',
 ];
 const ACTIVITY_OTHER_COLOR = 'rgba(var(--highlight-rgb), 0.28)';
+type ActivityPeriodValue = '1' | '7' | '30';
+const ACTIVITY_PERIOD_OPTIONS: ReadonlyArray<SegmentedOption<ActivityPeriodValue>> = [
+  { value: '1', label: 'Day' },
+  { value: '7', label: 'Week' },
+  { value: '30', label: 'Month' },
+];
 
 interface ActivityDonutSlice {
   key: string;
@@ -277,19 +283,21 @@ function ActivitySection(): React.ReactElement {
   const [error, setError] = useState<string | null>(null);
   const [hoveredDonutSlice, setHoveredDonutSlice] = useState<string | null>(null);
   const [activityHoverPoint, setActivityHoverPoint] = useState<ActivityHoverPoint | null>(null);
+  const [activityPeriod, setActivityPeriod] = useState<ActivityPeriodValue>('7');
+  const activityWindowDays = Number(activityPeriod);
 
   const loadSummary = useCallback(async () => {
     if (!api) return;
     setLoading(true);
     setError(null);
     try {
-      setSummary(await api.getSummary({ days: 7 }));
+      setSummary(await api.getSummary({ days: activityWindowDays }));
     } catch {
       setError('Could not read local activity.');
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, activityWindowDays]);
 
   useEffect(() => {
     if (!api) return undefined;
@@ -312,6 +320,11 @@ function ActivitySection(): React.ReactElement {
   const focusActivityHoverPopup = useCallback((key: string, event: React.FocusEvent<Element>) => {
     setHoveredDonutSlice(key);
     setActivityHoverPoint(activityHoverPointFromElement(event.currentTarget));
+  }, []);
+
+  const selectActivitySlice = useCallback((key: string) => {
+    setHoveredDonutSlice(key);
+    setActivityHoverPoint(null);
   }, []);
 
   const clearActivityHoverPopup = useCallback(() => {
@@ -354,14 +367,22 @@ function ActivitySection(): React.ReactElement {
             {error ?? updatedLabel}
           </div>
         </div>
-        <button
-          type="button"
-          className="conn-card__btn conn-card__btn--secondary"
-          onClick={() => { void loadSummary(); }}
-          disabled={loading}
-        >
-          {loading ? 'Refreshing' : 'Refresh'}
-        </button>
+        <div className="activity-card__actions">
+          <SegmentedControl<ActivityPeriodValue>
+            value={activityPeriod}
+            options={ACTIVITY_PERIOD_OPTIONS}
+            onChange={setActivityPeriod}
+            ariaLabel="Activity period"
+          />
+          <button
+            type="button"
+            className="conn-card__btn conn-card__btn--secondary"
+            onClick={() => { void loadSummary(); }}
+            disabled={loading}
+          >
+            {loading ? 'Refreshing' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {summary && (
@@ -396,7 +417,7 @@ function ActivitySection(): React.ReactElement {
                   {donutSlices.map((slice) => (
                     <path
                       key={slice.key}
-                      className="activity-donut__slice"
+                      className={`activity-donut__slice${hoveredDonutSlice === slice.key ? ' activity-donut__slice--active' : ''}`}
                       d={slice.path}
                       fill={slice.color}
                       role="graphics-symbol"
@@ -421,10 +442,9 @@ function ActivitySection(): React.ReactElement {
                 <div
                   className={`activity-app-row${hoveredDonutSlice === app.appKey ? ' activity-app-row--active' : ''}`}
                   key={app.appKey}
-                  onMouseEnter={(event) => showActivityHoverPopup(app.appKey, event)}
-                  onMouseMove={moveActivityHoverPopup}
+                  onMouseEnter={() => selectActivitySlice(app.appKey)}
                   onMouseLeave={clearActivityHoverPopup}
-                  onFocus={(event) => focusActivityHoverPopup(app.appKey, event)}
+                  onFocus={() => selectActivitySlice(app.appKey)}
                   onBlur={clearActivityHoverPopup}
                 >
                   <span
@@ -445,7 +465,11 @@ function ActivitySection(): React.ReactElement {
             </div>
           </div>
 
-          <div className="activity-week-chart" aria-label="Application usage by day">
+          <div
+            className="activity-week-chart"
+            aria-label="Application usage by day"
+            style={{ ['--activity-day-count' as string]: summary.daily.length }}
+          >
             {summary.daily.map((day) => {
               const daySegments = graphApps
                 .map((app, index) => ({

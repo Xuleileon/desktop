@@ -174,6 +174,7 @@ describe('SettingsPane shortcut recorder', () => {
   it('includes Activity as a settings tab and renders application usage', async () => {
     const { container, root } = renderSettingsPane(vi.fn(async () => true));
     const activityTab = container.querySelector<HTMLButtonElement>('[data-settings-tab="settings-activity"]');
+    const getSummary = vi.mocked(window.electronAPI!.settings.activity!.getSummary);
 
     await act(async () => {
       await Promise.resolve();
@@ -184,9 +185,25 @@ describe('SettingsPane shortcut recorder', () => {
     expect(container.querySelector('.activity-app-row__avatar img')).not.toBeNull();
     expect(container.textContent).toContain('Google Chrome');
     expect(container.textContent).toContain('45m');
+    expect(getSummary).toHaveBeenLastCalledWith({ days: 7 });
 
     const chromeSlice = container.querySelector<SVGPathElement>('.activity-donut__slice[aria-label^="Google Chrome"]');
     if (!chromeSlice) throw new Error('Missing Chrome donut slice');
+    const chromeRow = Array.from(container.querySelectorAll<HTMLElement>('.activity-app-row'))
+      .find((row) => row.textContent?.includes('Google Chrome'));
+    if (!chromeRow) throw new Error('Missing Chrome app row');
+
+    act(() => {
+      chromeRow.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: 520, clientY: 220 }));
+    });
+
+    expect(container.querySelector('.activity-hover-popup')).toBeNull();
+    expect(chromeRow.classList.contains('activity-app-row--active')).toBe(true);
+    expect(chromeSlice.classList.contains('activity-donut__slice--active')).toBe(true);
+
+    act(() => {
+      chromeRow.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+    });
 
     act(() => {
       chromeSlice.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: 260, clientY: 180 }));
@@ -198,6 +215,17 @@ describe('SettingsPane shortcut recorder', () => {
     expect(tooltip?.style.left).toBe('274px');
     expect(tooltip?.style.top).toBe('168px');
     expect(container.querySelector('.activity-app-row--active .activity-app-row__name')?.textContent).toBe('Google Chrome');
+
+    const monthButton = Array.from(container.querySelectorAll<HTMLButtonElement>('.settings-pane__segment'))
+      .find((button) => button.textContent === 'Month');
+    if (!monthButton) throw new Error('Missing Month activity period option');
+
+    await act(async () => {
+      monthButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(getSummary).toHaveBeenLastCalledWith({ days: 30 });
 
     act(() => root.unmount());
   });
