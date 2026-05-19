@@ -3502,7 +3502,7 @@ button:focus:not(:focus-visible) {
   padding: 7px 10px 7px 7px;
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--color-bg-primary) 94%, transparent);
+  background: var(--color-bg-elevated);
   box-shadow:
     0 12px 28px rgba(var(--shadow-rgb), 0.28),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);

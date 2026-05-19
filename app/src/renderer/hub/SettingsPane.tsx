@@ -406,9 +406,7 @@ function ActivitySection(): React.ReactElement {
                       onMouseMove={moveActivityHoverPopup}
                       onFocus={(event) => focusActivityHoverPopup(slice.key, event)}
                       onBlur={clearActivityHoverPopup}
-                    >
-                      <title>{`${slice.label}: ${formatActivityDuration(slice.durationMs)}`}</title>
-                    </path>
+                    />
                   ))}
                 </svg>
                 <div className="activity-donut__hole">
