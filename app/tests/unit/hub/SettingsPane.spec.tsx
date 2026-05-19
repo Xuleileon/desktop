@@ -185,6 +185,18 @@ describe('SettingsPane shortcut recorder', () => {
     expect(container.textContent).toContain('Google Chrome');
     expect(container.textContent).toContain('45m');
 
+    const chromeSlice = container.querySelector<SVGPathElement>('.activity-donut__slice[aria-label^="Google Chrome"]');
+    if (!chromeSlice) throw new Error('Missing Chrome donut slice');
+
+    act(() => {
+      chromeSlice.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+
+    const tooltip = container.querySelector('.activity-donut__tooltip');
+    expect(tooltip?.textContent).toContain('Google Chrome');
+    expect(tooltip?.textContent).toContain('30m');
+    expect(container.querySelector('.activity-app-row--active .activity-app-row__name')?.textContent).toBe('Google Chrome');
+
     act(() => root.unmount());
   });
 

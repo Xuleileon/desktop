@@ -259,6 +259,7 @@ const ACTIVITY_OTHER_COLOR = 'rgba(var(--highlight-rgb), 0.28)';
 interface ActivityDonutSlice {
   key: string;
   label: string;
+  iconDataUrl?: string;
   durationMs: number;
   color: string;
   path: string;
@@ -388,12 +389,36 @@ function ActivitySection(): React.ReactElement {
                   <span>{formatActivityDuration(activeDonutSlice?.durationMs ?? summary.totalMs, true)}</span>
                   <small>{activeDonutSlice?.label ?? 'Total'}</small>
                 </div>
+                {activeDonutSlice && (
+                  <div className="activity-donut__tooltip" role="status">
+                    <span
+                      className={`activity-donut__tooltip-avatar${activeDonutSlice.iconDataUrl ? ' activity-donut__tooltip-avatar--icon' : ''}`}
+                      style={{ backgroundColor: activeDonutSlice.color }}
+                      aria-hidden="true"
+                    >
+                      {activeDonutSlice.iconDataUrl ? (
+                        <img src={activeDonutSlice.iconDataUrl} alt="" />
+                      ) : (
+                        appInitials(activeDonutSlice.label)
+                      )}
+                    </span>
+                    <span className="activity-donut__tooltip-name">{activeDonutSlice.label}</span>
+                    <span className="activity-donut__tooltip-time">{formatActivityDuration(activeDonutSlice.durationMs, true)}</span>
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="activity-app-list" aria-label="Applications by tracked time">
               {listApps.map((app, index) => (
-                <div className="activity-app-row" key={app.appKey}>
+                <div
+                  className={`activity-app-row${hoveredDonutSlice === app.appKey ? ' activity-app-row--active' : ''}`}
+                  key={app.appKey}
+                  onMouseEnter={() => setHoveredDonutSlice(app.appKey)}
+                  onMouseLeave={() => setHoveredDonutSlice(null)}
+                  onFocus={() => setHoveredDonutSlice(app.appKey)}
+                  onBlur={() => setHoveredDonutSlice(null)}
+                >
                   <span
                     className={`activity-app-row__avatar${app.iconDataUrl ? ' activity-app-row__avatar--icon' : ''}`}
                     style={{ backgroundColor: activityColor(index) }}
@@ -480,6 +505,7 @@ function buildActivityDonutSlices(apps: ElectronActivitySummaryApp[], totalMs: n
     .map((app, index) => ({
       key: app.appKey,
       label: app.appName,
+      iconDataUrl: app.iconDataUrl,
       durationMs: app.totalMs,
       color: activityColor(index),
     }))
