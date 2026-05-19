@@ -3572,14 +3572,11 @@ button:focus:not(:focus-visible) {
   border-radius: var(--radius-sm);
   padding: 0 var(--space-2);
   margin: 0 calc(var(--space-2) * -1);
-  transition:
-    background-color var(--duration-fast) var(--ease-out),
-    box-shadow var(--duration-fast) var(--ease-out);
+  transition: background-color var(--duration-fast) var(--ease-out);
 }
 
 .activity-app-row--active {
   background: var(--color-bg-hover);
-  box-shadow: inset 3px 0 0 var(--color-accent-default);
 }
 
 .activity-app-row:last-child {
@@ -3625,9 +3622,10 @@ button:focus:not(:focus-visible) {
 }
 
 .activity-app-row__time {
-  color: var(--color-fg-tertiary);
+  color: var(--color-fg-secondary);
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
