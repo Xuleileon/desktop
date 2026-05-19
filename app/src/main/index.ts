@@ -146,6 +146,8 @@ import {
   type ResourceMonitorContext,
 } from './resourceMonitor';
 import { startActivityTracker, stopActivityTracker } from './activityTracker';
+import { readActivityUsageSummary } from './activitySummary';
+import { withActivityAppIcons } from './activityAppIcons';
 // Channels (WhatsApp)
 import { WhatsAppAdapter } from './channels/WhatsAppAdapter';
 import { ChannelRouter } from './channels/ChannelRouter';
@@ -251,6 +253,10 @@ type SettingsOpenPayload = {
   focusBrowserCodeProvider?: string;
 };
 
+type ActivitySummaryOptions = {
+  windowDays?: number;
+};
+
 function normalizeSettingsOpenPayload(payload: unknown): SettingsOpenPayload | undefined {
   if (!payload || typeof payload !== 'object') return undefined;
   const rawProvider = (payload as { focusBrowserCodeProvider?: unknown }).focusBrowserCodeProvider;
@@ -258,6 +264,14 @@ function normalizeSettingsOpenPayload(payload: unknown): SettingsOpenPayload | u
   const providerId = rawProvider.trim();
   if (!providerId || providerId.length > 80) return undefined;
   return { focusBrowserCodeProvider: providerId };
+}
+
+function normalizeActivitySummaryOptions(payload: unknown): ActivitySummaryOptions {
+  if (!payload || typeof payload !== 'object') return {};
+  const rawWindowDays = (payload as { days?: unknown; windowDays?: unknown }).windowDays
+    ?? (payload as { days?: unknown }).days;
+  if (typeof rawWindowDays !== 'number' || !Number.isFinite(rawWindowDays)) return {};
+  return { windowDays: rawWindowDays };
 }
 
 function openSettingsInShell(payload?: SettingsOpenPayload): void {
@@ -1949,6 +1963,15 @@ app.whenReady().then(async () => {
   ipcMain.handle('settings:app:install-update', () => {
     mainLogger.info('main.settings:app:install-update');
     return installDownloadedUpdate();
+  });
+
+  ipcMain.handle('settings:activity:get-summary', async (_e, rawOptions?: unknown) => {
+    const options = normalizeActivitySummaryOptions(rawOptions);
+    mainLogger.debug('main.settings:activity:get-summary', { windowDays: options.windowDays });
+    return withActivityAppIcons(readActivityUsageSummary({
+      userDataPath: app.getPath('userData'),
+      windowDays: options.windowDays,
+    }));
   });
 
   const unsubscribeUpdateStatus = onUpdateStatusChanged((event) => {

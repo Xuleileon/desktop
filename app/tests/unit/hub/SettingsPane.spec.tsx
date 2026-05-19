@@ -33,6 +33,55 @@ function installElectronApi(): void {
           downloadLatest: vi.fn(),
           installUpdate: vi.fn(),
         },
+        activity: {
+          getSummary: vi.fn(async () => ({
+            filePath: '/tmp/activity-events.jsonl',
+            fileExists: true,
+            generatedAt: new Date(2026, 4, 18, 9, 30, 0).toISOString(),
+            windowDays: 7,
+            totalMs: 45 * 60_000,
+            sampleCount: 12,
+            parseErrorCount: 0,
+            truncated: false,
+            apps: [
+              {
+                appKey: 'com.google.Chrome',
+                appName: 'Google Chrome',
+                bundleId: 'com.google.Chrome',
+                iconDataUrl: 'data:image/png;base64,chrome',
+                totalMs: 30 * 60_000,
+                percent: 2 / 3,
+                switchCount: 2,
+                lastSeenAt: new Date(2026, 4, 18, 9, 20, 0).toISOString(),
+              },
+              {
+                appKey: 'com.todesktop.230313mzl4w4u92',
+                appName: 'Cursor',
+                bundleId: 'com.todesktop.230313mzl4w4u92',
+                totalMs: 15 * 60_000,
+                percent: 1 / 3,
+                switchCount: 1,
+                lastSeenAt: new Date(2026, 4, 18, 9, 30, 0).toISOString(),
+              },
+            ],
+            daily: [
+              { date: '2026-05-12', totalMs: 0, apps: [] },
+              { date: '2026-05-13', totalMs: 0, apps: [] },
+              { date: '2026-05-14', totalMs: 0, apps: [] },
+              { date: '2026-05-15', totalMs: 0, apps: [] },
+              { date: '2026-05-16', totalMs: 0, apps: [] },
+              { date: '2026-05-17', totalMs: 0, apps: [] },
+              {
+                date: '2026-05-18',
+                totalMs: 45 * 60_000,
+                apps: [
+                  { appKey: 'com.google.Chrome', durationMs: 30 * 60_000 },
+                  { appKey: 'com.todesktop.230313mzl4w4u92', durationMs: 15 * 60_000 },
+                ],
+              },
+            ],
+          })),
+        },
         privacy: {
           get: vi.fn(async () => ({ telemetry: false, telemetryUpdatedAt: null, version: 1 })),
           setTelemetry: vi.fn(async (telemetry: boolean) => ({ telemetry, telemetryUpdatedAt: null, version: 1 })),
@@ -118,6 +167,23 @@ describe('SettingsPane shortcut recorder', () => {
     const browserSyncTab = container.querySelector<HTMLButtonElement>('[data-settings-tab="settings-browser-sync"]');
 
     expect(browserSyncTab?.textContent).toBe('Browser Sync');
+
+    act(() => root.unmount());
+  });
+
+  it('includes Activity as a settings tab and renders application usage', async () => {
+    const { container, root } = renderSettingsPane(vi.fn(async () => true));
+    const activityTab = container.querySelector<HTMLButtonElement>('[data-settings-tab="settings-activity"]');
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(activityTab?.textContent).toBe('Activity');
+    expect(container.querySelector('.activity-week-chart')).not.toBeNull();
+    expect(container.querySelector('.activity-app-row__avatar img')).not.toBeNull();
+    expect(container.textContent).toContain('Google Chrome');
+    expect(container.textContent).toContain('45m');
 
     act(() => root.unmount());
   });

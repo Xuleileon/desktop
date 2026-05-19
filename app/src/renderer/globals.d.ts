@@ -344,6 +344,43 @@ interface ElectronSettingsAppAPI {
   }) => void) => () => void;
 }
 
+interface ElectronActivitySummaryApp {
+  appKey: string;
+  appName: string;
+  bundleId?: string;
+  iconDataUrl?: string;
+  totalMs: number;
+  percent: number;
+  switchCount: number;
+  lastSeenAt?: string;
+  lastWindowTitle?: string;
+}
+
+interface ElectronActivitySummaryDay {
+  date: string;
+  totalMs: number;
+  apps: Array<{ appKey: string; durationMs: number }>;
+}
+
+interface ElectronActivityUsageSummary {
+  filePath: string;
+  fileExists: boolean;
+  generatedAt: string;
+  windowDays: number;
+  totalMs: number;
+  sampleCount: number;
+  parseErrorCount: number;
+  truncated: boolean;
+  startAt?: string;
+  endAt?: string;
+  apps: ElectronActivitySummaryApp[];
+  daily: ElectronActivitySummaryDay[];
+}
+
+interface ElectronSettingsActivityAPI {
+  getSummary: (options?: { days?: number; windowDays?: number }) => Promise<ElectronActivityUsageSummary>;
+}
+
 interface ElectronSettingsAPI {
   open?: (payload?: { focusBrowserCodeProvider?: string }) => Promise<void>;
   apiKey: ElectronSettingsApiKeyAPI;
@@ -352,6 +389,7 @@ interface ElectronSettingsAPI {
   codex?: ElectronSettingsCodexAPI;
   browserCode?: ElectronSettingsBrowserCodeAPI;
   app?: ElectronSettingsAppAPI;
+  activity?: ElectronSettingsActivityAPI;
 }
 
 interface ElectronAPI {

@@ -3360,6 +3360,269 @@ button:focus:not(:focus-visible) {
     0 12px 32px rgba(var(--shadow-rgb), 0.4);
 }
 
+.activity-card {
+  padding: 0;
+}
+
+.activity-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.activity-card__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.activity-card__metrics > div {
+  min-width: 0;
+  padding: var(--space-3) var(--space-5);
+  border-right: 1px solid var(--color-border-subtle);
+}
+
+.activity-card__metrics > div:last-child {
+  border-right: 0;
+}
+
+.activity-card__metrics span {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--color-fg-tertiary);
+  font-size: var(--font-size-2xs);
+}
+
+.activity-card__metrics strong {
+  display: block;
+  color: var(--color-fg-primary);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.2;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-overview {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(280px, 1fr);
+  align-items: center;
+  gap: var(--space-5);
+  padding: var(--space-5);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.activity-donut {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+}
+
+.activity-donut__ring {
+  position: relative;
+  width: min(220px, 100%);
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  box-shadow:
+    0 18px 42px rgba(var(--shadow-rgb), 0.22);
+}
+
+.activity-donut__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.activity-donut__slice {
+  cursor: pointer;
+  outline: none;
+  stroke: var(--color-bg-sunken);
+  stroke-width: 1.2;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    filter var(--duration-fast) var(--ease-out),
+    opacity var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+.activity-donut__slice:hover,
+.activity-donut__slice:focus-visible {
+  filter: brightness(1.08) saturate(1.08);
+  stroke: var(--color-fg-primary);
+  stroke-width: 2;
+  transform: scale(1.012);
+}
+
+.activity-donut__hole {
+  position: relative;
+  z-index: 1;
+  width: 50%;
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-bg-sunken);
+  box-shadow: inset 0 0 0 1px var(--color-border-subtle);
+}
+
+.activity-donut__hole span {
+  color: var(--color-fg-primary);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-donut__hole small {
+  margin-top: 3px;
+  color: var(--color-fg-tertiary);
+  font-size: var(--font-size-2xs);
+}
+
+.activity-app-list {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.activity-app-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 38px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.activity-app-row:last-child {
+  border-bottom: 0;
+}
+
+.activity-app-row__avatar {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: #101014;
+  font-size: 9px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+}
+
+.activity-app-row__avatar--icon {
+  overflow: hidden;
+  background: transparent !important;
+  box-shadow: none;
+}
+
+.activity-app-row__avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.activity-app-row__name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-fg-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-app-row__time {
+  color: var(--color-fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.activity-week-chart {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(44px, 1fr));
+  align-items: end;
+  gap: var(--space-3);
+  min-height: 250px;
+  padding: var(--space-5) var(--space-5) var(--space-4);
+}
+
+.activity-day {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: 24px 180px 20px;
+  align-items: end;
+  gap: var(--space-2);
+}
+
+.activity-day__value,
+.activity-day__label {
+  overflow: hidden;
+  color: var(--color-fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-day__track {
+  height: 180px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.activity-day__bar {
+  width: min(52px, 100%);
+  min-height: 0;
+  display: flex;
+  flex-direction: column-reverse;
+  overflow: hidden;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: rgba(var(--highlight-rgb), 0.08);
+}
+
+.activity-day__segment {
+  display: block;
+  width: 100%;
+  min-height: 1px;
+}
+
+.activity-empty-state {
+  padding: var(--space-8) var(--space-5);
+  color: var(--color-fg-tertiary);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+.activity-card__note {
+  padding: 0 var(--space-5) var(--space-4);
+  color: var(--color-fg-tertiary);
+  font-size: var(--font-size-2xs);
+}
+
 @media (max-width: 760px) {
   .settings-page__content {
     width: calc(100% - 32px);
@@ -3389,6 +3652,32 @@ button:focus:not(:focus-visible) {
 
   .settings-card .settings-pane__row {
     align-items: flex-start;
+  }
+
+  .activity-card__metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .activity-card__metrics > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+
+  .activity-card__metrics > div:last-child {
+    border-bottom: 0;
+  }
+
+  .activity-overview {
+    grid-template-columns: 1fr;
+  }
+
+  .activity-week-chart {
+    gap: var(--space-2);
+    overflow-x: auto;
+  }
+
+  .activity-day {
+    min-width: 44px;
   }
 }
 

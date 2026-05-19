@@ -206,6 +206,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
         return () => ipcRenderer.removeListener('settings:app:update-status', handler);
       },
     },
+    activity: {
+      getSummary: (options?: { days?: number; windowDays?: number }) =>
+        ipcRenderer.invoke('settings:activity:get-summary', options),
+    },
   },
   telemetry: {
     capture: (name: string, props?: Record<string, string | number | boolean>): void => {

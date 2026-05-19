@@ -244,6 +244,329 @@ type UpdateStatusEvent = {
   };
 };
 
+const ACTIVITY_APP_COLORS = [
+  '#7dd3fc',
+  '#34d399',
+  '#f97316',
+  '#a78bfa',
+  '#facc15',
+  '#f472b6',
+  '#60a5fa',
+  '#fb7185',
+];
+const ACTIVITY_OTHER_COLOR = 'rgba(var(--highlight-rgb), 0.28)';
+
+interface ActivityDonutSlice {
+  key: string;
+  label: string;
+  durationMs: number;
+  color: string;
+  path: string;
+}
+
+function ActivitySection(): React.ReactElement {
+  const api = window.electronAPI?.settings?.activity;
+  const [summary, setSummary] = useState<ElectronActivityUsageSummary | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [hoveredDonutSlice, setHoveredDonutSlice] = useState<string | null>(null);
+
+  const loadSummary = useCallback(async () => {
+    if (!api) return;
+    setLoading(true);
+    setError(null);
+    try {
+      setSummary(await api.getSummary({ days: 7 }));
+    } catch {
+      setError('Could not read local activity.');
+    } finally {
+      setLoading(false);
+    }
+  }, [api]);
+
+  useEffect(() => {
+    if (!api) return undefined;
+    void loadSummary();
+    const refreshTimer = window.setInterval(() => {
+      void loadSummary();
+    }, 15_000);
+    return () => window.clearInterval(refreshTimer);
+  }, [loadSummary]);
+
+  if (!api) {
+    return (
+      <div className="settings-card activity-card activity-card--empty">
+        <div className="activity-card__header">
+          <div>
+            <div className="settings-pane__label">Applications</div>
+            <div className="settings-pane__sublabel">Activity summary unavailable.</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const graphApps = summary?.apps.slice(0, 6) ?? [];
+  const listApps = summary?.apps.slice(0, 10) ?? [];
+  const graphAppKeys = new Set(graphApps.map((app) => app.appKey));
+  const maxDailyMs = Math.max(1, ...(summary?.daily.map((day) => day.totalMs) ?? [0]));
+  const hasUsage = (summary?.totalMs ?? 0) > 0;
+  const donutSlices = summary ? buildActivityDonutSlices(graphApps, summary.totalMs) : [];
+  const activeDonutSlice = donutSlices.find((slice) => slice.key === hoveredDonutSlice) ?? null;
+  const updatedLabel = summary
+    ? `${summary.fileExists ? 'Updated' : 'Waiting'} ${formatActivityTimestamp(summary.generatedAt)}`
+    : loading
+      ? 'Loading local activity...'
+      : 'Waiting for local activity...';
+
+  return (
+    <div className="settings-card activity-card">
+      <div className="activity-card__header">
+        <div>
+          <div className="settings-pane__label">Applications</div>
+          <div className="settings-pane__sublabel">
+            {error ?? updatedLabel}
+          </div>
+        </div>
+        <button
+          type="button"
+          className="conn-card__btn conn-card__btn--secondary"
+          onClick={() => { void loadSummary(); }}
+          disabled={loading}
+        >
+          {loading ? 'Refreshing' : 'Refresh'}
+        </button>
+      </div>
+
+      {summary && (
+        <div className="activity-card__metrics">
+          <div>
+            <span>Tracked</span>
+            <strong>{formatActivityDuration(summary.totalMs)}</strong>
+          </div>
+          <div>
+            <span>Samples</span>
+            <strong>{summary.sampleCount.toLocaleString()}</strong>
+          </div>
+          <div>
+            <span>Apps</span>
+            <strong>{summary.apps.length.toLocaleString()}</strong>
+          </div>
+        </div>
+      )}
+
+      {!summary || !hasUsage ? (
+        <div className="activity-empty-state">
+          {summary?.fileExists === false
+            ? 'No activity file yet.'
+            : 'No app samples yet.'}
+        </div>
+      ) : (
+        <>
+          <div className="activity-overview">
+            <div className="activity-donut" aria-label="Application usage share">
+              <div className="activity-donut__ring" onMouseLeave={() => setHoveredDonutSlice(null)}>
+                <svg className="activity-donut__svg" viewBox="0 0 200 200" role="img" aria-label="Application usage share">
+                  {donutSlices.map((slice) => (
+                    <path
+                      key={slice.key}
+                      className="activity-donut__slice"
+                      d={slice.path}
+                      fill={slice.color}
+                      role="graphics-symbol"
+                      tabIndex={0}
+                      aria-label={`${slice.label}: ${formatActivityDuration(slice.durationMs)}`}
+                      onMouseEnter={() => setHoveredDonutSlice(slice.key)}
+                      onFocus={() => setHoveredDonutSlice(slice.key)}
+                      onBlur={() => setHoveredDonutSlice(null)}
+                    >
+                      <title>{`${slice.label}: ${formatActivityDuration(slice.durationMs)}`}</title>
+                    </path>
+                  ))}
+                </svg>
+                <div className="activity-donut__hole">
+                  <span>{formatActivityDuration(activeDonutSlice?.durationMs ?? summary.totalMs, true)}</span>
+                  <small>{activeDonutSlice?.label ?? 'Total'}</small>
+                </div>
+              </div>
+            </div>
+
+            <div className="activity-app-list" aria-label="Applications by tracked time">
+              {listApps.map((app, index) => (
+                <div className="activity-app-row" key={app.appKey}>
+                  <span
+                    className={`activity-app-row__avatar${app.iconDataUrl ? ' activity-app-row__avatar--icon' : ''}`}
+                    style={{ backgroundColor: activityColor(index) }}
+                    aria-hidden="true"
+                  >
+                    {app.iconDataUrl ? (
+                      <img src={app.iconDataUrl} alt="" />
+                    ) : (
+                      appInitials(app.appName)
+                    )}
+                  </span>
+                  <span className="activity-app-row__name" title={app.appName}>{app.appName}</span>
+                  <span className="activity-app-row__time">{formatActivityDuration(app.totalMs, true)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="activity-week-chart" aria-label="Application usage by day">
+            {summary.daily.map((day) => {
+              const daySegments = graphApps
+                .map((app, index) => ({
+                  appKey: app.appKey,
+                  label: app.appName,
+                  color: activityColor(index),
+                  durationMs: day.apps.find((entry) => entry.appKey === app.appKey)?.durationMs ?? 0,
+                }))
+                .filter((segment) => segment.durationMs > 0);
+              const otherMs = day.apps
+                .filter((entry) => !graphAppKeys.has(entry.appKey))
+                .reduce((sum, entry) => sum + entry.durationMs, 0);
+              if (otherMs > 0) {
+                daySegments.push({
+                  appKey: 'other',
+                  label: 'Other',
+                  color: ACTIVITY_OTHER_COLOR,
+                  durationMs: otherMs,
+                });
+              }
+              const barHeight = day.totalMs > 0 ? Math.max(4, (day.totalMs / maxDailyMs) * 100) : 0;
+              return (
+                <div className="activity-day" key={day.date}>
+                  <div className="activity-day__value">{day.totalMs > 0 ? formatActivityDuration(day.totalMs, true) : ''}</div>
+                  <div className="activity-day__track">
+                    <div className="activity-day__bar" style={{ height: `${barHeight}%` }}>
+                      {daySegments.map((segment) => (
+                        <span
+                          key={segment.appKey}
+                          className="activity-day__segment"
+                          title={`${segment.label}: ${formatActivityDuration(segment.durationMs)}`}
+                          style={{
+                            backgroundColor: segment.color,
+                            height: `${(segment.durationMs / Math.max(1, day.totalMs)) * 100}%`,
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="activity-day__label">{formatActivityDayLabel(day.date)}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          {(summary.truncated || summary.parseErrorCount > 0) && (
+            <div className="activity-card__note">
+              {summary.truncated ? 'Showing the latest activity window.' : ''}
+              {summary.parseErrorCount > 0 ? ` Skipped ${summary.parseErrorCount} malformed event${summary.parseErrorCount === 1 ? '' : 's'}.` : ''}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function activityColor(index: number): string {
+  return ACTIVITY_APP_COLORS[index % ACTIVITY_APP_COLORS.length];
+}
+
+function buildActivityDonutSlices(apps: ElectronActivitySummaryApp[], totalMs: number): ActivityDonutSlice[] {
+  if (totalMs <= 0) return [];
+  const baseSlices = apps
+    .map((app, index) => ({
+      key: app.appKey,
+      label: app.appName,
+      durationMs: app.totalMs,
+      color: activityColor(index),
+    }))
+    .filter((slice) => slice.durationMs > 0);
+  const visibleMs = baseSlices.reduce((sum, slice) => sum + slice.durationMs, 0);
+  const otherMs = Math.max(0, totalMs - visibleMs);
+  const sourceSlices = otherMs > 0
+    ? [...baseSlices, { key: 'other', label: 'Other', durationMs: otherMs, color: ACTIVITY_OTHER_COLOR }]
+    : baseSlices;
+
+  let cursor = 0;
+  return sourceSlices.map((slice, index) => {
+    const sweep = (slice.durationMs / totalMs) * 360;
+    const startAngle = cursor;
+    cursor += sweep;
+    const endAngle = sourceSlices.length === 1
+      ? 359.999
+      : index === sourceSlices.length - 1
+        ? 359.999
+        : Math.max(startAngle + 0.001, Math.min(cursor, 359.999));
+    return {
+      ...slice,
+      path: donutSegmentPath(100, 100, 88, 45, startAngle, endAngle),
+    };
+  });
+}
+
+function donutSegmentPath(
+  centerX: number,
+  centerY: number,
+  outerRadius: number,
+  innerRadius: number,
+  startAngle: number,
+  endAngle: number,
+): string {
+  const outerStart = polarPoint(centerX, centerY, outerRadius, startAngle);
+  const outerEnd = polarPoint(centerX, centerY, outerRadius, endAngle);
+  const innerEnd = polarPoint(centerX, centerY, innerRadius, endAngle);
+  const innerStart = polarPoint(centerX, centerY, innerRadius, startAngle);
+  const largeArc = endAngle - startAngle > 180 ? 1 : 0;
+  return [
+    `M ${outerStart.x} ${outerStart.y}`,
+    `A ${outerRadius} ${outerRadius} 0 ${largeArc} 1 ${outerEnd.x} ${outerEnd.y}`,
+    `L ${innerEnd.x} ${innerEnd.y}`,
+    `A ${innerRadius} ${innerRadius} 0 ${largeArc} 0 ${innerStart.x} ${innerStart.y}`,
+    'Z',
+  ].join(' ');
+}
+
+function polarPoint(centerX: number, centerY: number, radius: number, angle: number): { x: string; y: string } {
+  const radians = (angle - 90) * (Math.PI / 180);
+  return {
+    x: (centerX + radius * Math.cos(radians)).toFixed(3),
+    y: (centerY + radius * Math.sin(radians)).toFixed(3),
+  };
+}
+
+function formatActivityDuration(ms: number, compact = false): string {
+  const totalMinutes = Math.max(0, Math.round(ms / 60_000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (compact) {
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes}m`;
+  }
+  if (hours > 0) return `${hours} hour${hours === 1 ? '' : 's'} ${minutes} min`;
+  return `${minutes} min`;
+}
+
+function formatActivityTimestamp(value: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function formatActivityDayLabel(value: string): string {
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) return value;
+  return `${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')}`;
+}
+
+function appInitials(name: string): string {
+  const words = name.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return `${words[0][0]}${words[1][0]}`.toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
 function AppSection(): React.ReactElement {
   const [info, setInfo] = useState<Awaited<ReturnType<ElectronAppAPI['getInfo']>> | null>(null);
   const [updateStatusEvent, setUpdateStatusEvent] = useState<UpdateStatusEvent>({ status: 'idle' });
@@ -544,6 +867,7 @@ export type SettingsSectionId =
   | 'settings-model-providers'
   | 'settings-connections'
   | 'settings-browser-sync'
+  | 'settings-activity'
   | 'settings-shortcuts'
   | 'settings-privacy'
   | 'settings-appearance'
@@ -557,6 +881,7 @@ export interface SettingsOpenIntent {
 
 const SETTINGS_TABS: Array<{ id: SettingsSectionId; label: string }> = [
   { id: 'settings-application', label: 'Application' },
+  { id: 'settings-activity', label: 'Activity' },
   { id: 'settings-appearance', label: 'Appearance' },
   { id: 'settings-model-providers', label: 'Model providers' },
   { id: 'settings-connections', label: 'Connections' },
@@ -775,6 +1100,13 @@ export function SettingsPane({ intent, keybindings, overrides, onUpdateBinding, 
             </div>
             <AppSection />
             <LayoutSection />
+          </section>
+
+          <section id="settings-activity" className="settings-page__section">
+            <div className="settings-section-header">
+              <h2 className="settings-section-header__title">Activity</h2>
+            </div>
+            <ActivitySection />
           </section>
 
           <section id="settings-appearance" className="settings-page__section">
