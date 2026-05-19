@@ -345,13 +345,15 @@ function ActivitySection(): React.ReactElement {
     );
   }
 
-  const graphApps = summary?.apps.slice(0, 6) ?? [];
-  const listApps = summary?.apps.slice(0, 10) ?? [];
+  const visibleActivityApps = activityDisplayApps(summary, 10);
+  const graphApps = visibleActivityApps;
+  const listApps = visibleActivityApps;
   const graphAppKeys = new Set(graphApps.map((app) => app.appKey));
   const maxDailyMs = Math.max(1, ...(summary?.daily.map((day) => day.totalMs) ?? [0]));
   const hasUsage = (summary?.totalMs ?? 0) > 0;
   const donutSlices = summary ? buildActivityDonutSlices(graphApps, summary.totalMs) : [];
   const activeDonutSlice = donutSlices.find((slice) => slice.key === hoveredDonutSlice) ?? null;
+  const hasActiveActivitySelection = hoveredDonutSlice !== null;
   const updatedLabel = summary
     ? `${summary.fileExists ? 'Updated' : 'Waiting'} ${formatActivityTimestamp(summary.generatedAt)}`
     : loading
@@ -417,7 +419,7 @@ function ActivitySection(): React.ReactElement {
                   {donutSlices.map((slice) => (
                     <path
                       key={slice.key}
-                      className={`activity-donut__slice${hoveredDonutSlice === slice.key ? ' activity-donut__slice--active' : ''}`}
+                      className={`activity-donut__slice${hoveredDonutSlice === slice.key ? ' activity-donut__slice--active' : ''}${hasActiveActivitySelection && hoveredDonutSlice !== slice.key ? ' activity-donut__slice--muted' : ''}`}
                       d={slice.path}
                       fill={slice.color}
                       role="graphics-symbol"
@@ -449,7 +451,7 @@ function ActivitySection(): React.ReactElement {
                 >
                   <span
                     className={`activity-app-row__avatar${app.iconDataUrl ? ' activity-app-row__avatar--icon' : ''}`}
-                    style={{ backgroundColor: activityColor(index) }}
+                    style={{ backgroundColor: app.appKey === 'other' ? ACTIVITY_OTHER_COLOR : activityColor(index) }}
                     aria-hidden="true"
                   >
                     {app.iconDataUrl ? (
@@ -475,7 +477,7 @@ function ActivitySection(): React.ReactElement {
                 .map((app, index) => ({
                   appKey: app.appKey,
                   label: app.appName,
-                  color: activityColor(index),
+                  color: app.appKey === 'other' ? ACTIVITY_OTHER_COLOR : activityColor(index),
                   durationMs: day.apps.find((entry) => entry.appKey === app.appKey)?.durationMs ?? 0,
                 }))
                 .filter((segment) => segment.durationMs > 0);
@@ -573,6 +575,26 @@ function activityColor(index: number): string {
   return ACTIVITY_APP_COLORS[index % ACTIVITY_APP_COLORS.length];
 }
 
+function activityDisplayApps(summary: ElectronActivityUsageSummary | null, limit: number): ElectronActivitySummaryApp[] {
+  if (!summary) return [];
+  const visibleApps = summary.apps
+    .filter((app) => app.totalMs > 0)
+    .slice(0, limit);
+  const visibleMs = visibleApps.reduce((sum, app) => sum + app.totalMs, 0);
+  const otherMs = Math.max(0, summary.totalMs - visibleMs);
+  if (otherMs <= 0) return visibleApps;
+  return [
+    ...visibleApps,
+    {
+      appKey: 'other',
+      appName: 'Other',
+      totalMs: otherMs,
+      percent: summary.totalMs > 0 ? otherMs / summary.totalMs : 0,
+      switchCount: 0,
+    },
+  ];
+}
+
 function buildActivityDonutSlices(apps: ElectronActivitySummaryApp[], totalMs: number): ActivityDonutSlice[] {
   if (totalMs <= 0) return [];
   const baseSlices = apps
@@ -581,7 +603,7 @@ function buildActivityDonutSlices(apps: ElectronActivitySummaryApp[], totalMs: n
       label: app.appName,
       iconDataUrl: app.iconDataUrl,
       durationMs: app.totalMs,
-      color: activityColor(index),
+      color: app.appKey === 'other' ? ACTIVITY_OTHER_COLOR : activityColor(index),
     }))
     .filter((slice) => slice.durationMs > 0);
   const visibleMs = baseSlices.reduce((sum, slice) => sum + slice.durationMs, 0);
