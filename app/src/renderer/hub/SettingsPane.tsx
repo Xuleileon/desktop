@@ -265,12 +265,18 @@ interface ActivityDonutSlice {
   path: string;
 }
 
+interface ActivityHoverPoint {
+  x: number;
+  y: number;
+}
+
 function ActivitySection(): React.ReactElement {
   const api = window.electronAPI?.settings?.activity;
   const [summary, setSummary] = useState<ElectronActivityUsageSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hoveredDonutSlice, setHoveredDonutSlice] = useState<string | null>(null);
+  const [activityHoverPoint, setActivityHoverPoint] = useState<ActivityHoverPoint | null>(null);
 
   const loadSummary = useCallback(async () => {
     if (!api) return;
@@ -293,6 +299,25 @@ function ActivitySection(): React.ReactElement {
     }, 15_000);
     return () => window.clearInterval(refreshTimer);
   }, [loadSummary]);
+
+  const showActivityHoverPopup = useCallback((key: string, event: React.MouseEvent<Element>) => {
+    setHoveredDonutSlice(key);
+    setActivityHoverPoint(activityHoverPointFromMouse(event));
+  }, []);
+
+  const moveActivityHoverPopup = useCallback((event: React.MouseEvent<Element>) => {
+    setActivityHoverPoint(activityHoverPointFromMouse(event));
+  }, []);
+
+  const focusActivityHoverPopup = useCallback((key: string, event: React.FocusEvent<Element>) => {
+    setHoveredDonutSlice(key);
+    setActivityHoverPoint(activityHoverPointFromElement(event.currentTarget));
+  }, []);
+
+  const clearActivityHoverPopup = useCallback(() => {
+    setHoveredDonutSlice(null);
+    setActivityHoverPoint(null);
+  }, []);
 
   if (!api) {
     return (
@@ -366,7 +391,7 @@ function ActivitySection(): React.ReactElement {
         <>
           <div className="activity-overview">
             <div className="activity-donut" aria-label="Application usage share">
-              <div className="activity-donut__ring" onMouseLeave={() => setHoveredDonutSlice(null)}>
+              <div className="activity-donut__ring" onMouseLeave={clearActivityHoverPopup}>
                 <svg className="activity-donut__svg" viewBox="0 0 200 200" role="img" aria-label="Application usage share">
                   {donutSlices.map((slice) => (
                     <path
@@ -377,9 +402,10 @@ function ActivitySection(): React.ReactElement {
                       role="graphics-symbol"
                       tabIndex={0}
                       aria-label={`${slice.label}: ${formatActivityDuration(slice.durationMs)}`}
-                      onMouseEnter={() => setHoveredDonutSlice(slice.key)}
-                      onFocus={() => setHoveredDonutSlice(slice.key)}
-                      onBlur={() => setHoveredDonutSlice(null)}
+                      onMouseEnter={(event) => showActivityHoverPopup(slice.key, event)}
+                      onMouseMove={moveActivityHoverPopup}
+                      onFocus={(event) => focusActivityHoverPopup(slice.key, event)}
+                      onBlur={clearActivityHoverPopup}
                     >
                       <title>{`${slice.label}: ${formatActivityDuration(slice.durationMs)}`}</title>
                     </path>
@@ -389,23 +415,6 @@ function ActivitySection(): React.ReactElement {
                   <span>{formatActivityDuration(activeDonutSlice?.durationMs ?? summary.totalMs, true)}</span>
                   <small>{activeDonutSlice?.label ?? 'Total'}</small>
                 </div>
-                {activeDonutSlice && (
-                  <div className="activity-donut__tooltip" role="status">
-                    <span
-                      className={`activity-donut__tooltip-avatar${activeDonutSlice.iconDataUrl ? ' activity-donut__tooltip-avatar--icon' : ''}`}
-                      style={{ backgroundColor: activeDonutSlice.color }}
-                      aria-hidden="true"
-                    >
-                      {activeDonutSlice.iconDataUrl ? (
-                        <img src={activeDonutSlice.iconDataUrl} alt="" />
-                      ) : (
-                        appInitials(activeDonutSlice.label)
-                      )}
-                    </span>
-                    <span className="activity-donut__tooltip-name">{activeDonutSlice.label}</span>
-                    <span className="activity-donut__tooltip-time">{formatActivityDuration(activeDonutSlice.durationMs, true)}</span>
-                  </div>
-                )}
               </div>
             </div>
 
@@ -414,10 +423,11 @@ function ActivitySection(): React.ReactElement {
                 <div
                   className={`activity-app-row${hoveredDonutSlice === app.appKey ? ' activity-app-row--active' : ''}`}
                   key={app.appKey}
-                  onMouseEnter={() => setHoveredDonutSlice(app.appKey)}
-                  onMouseLeave={() => setHoveredDonutSlice(null)}
-                  onFocus={() => setHoveredDonutSlice(app.appKey)}
-                  onBlur={() => setHoveredDonutSlice(null)}
+                  onMouseEnter={(event) => showActivityHoverPopup(app.appKey, event)}
+                  onMouseMove={moveActivityHoverPopup}
+                  onMouseLeave={clearActivityHoverPopup}
+                  onFocus={(event) => focusActivityHoverPopup(app.appKey, event)}
+                  onBlur={clearActivityHoverPopup}
                 >
                   <span
                     className={`activity-app-row__avatar${app.iconDataUrl ? ' activity-app-row__avatar--icon' : ''}`}
@@ -489,10 +499,52 @@ function ActivitySection(): React.ReactElement {
               {summary.parseErrorCount > 0 ? ` Skipped ${summary.parseErrorCount} malformed event${summary.parseErrorCount === 1 ? '' : 's'}.` : ''}
             </div>
           )}
+
+          {activeDonutSlice && activityHoverPoint && (
+            <div
+              className="activity-hover-popup"
+              role="tooltip"
+              style={{
+                left: `${activityHoverPoint.x}px`,
+                top: `${activityHoverPoint.y}px`,
+              }}
+            >
+              <span
+                className={`activity-hover-popup__avatar${activeDonutSlice.iconDataUrl ? ' activity-hover-popup__avatar--icon' : ''}`}
+                style={{ backgroundColor: activeDonutSlice.color }}
+                aria-hidden="true"
+              >
+                {activeDonutSlice.iconDataUrl ? (
+                  <img src={activeDonutSlice.iconDataUrl} alt="" />
+                ) : (
+                  appInitials(activeDonutSlice.label)
+                )}
+              </span>
+              <span className="activity-hover-popup__name">{activeDonutSlice.label}</span>
+              <span className="activity-hover-popup__time">{formatActivityDuration(activeDonutSlice.durationMs, true)}</span>
+            </div>
+          )}
         </>
       )}
     </div>
   );
+}
+
+function activityHoverPointFromMouse(event: React.MouseEvent<Element>): ActivityHoverPoint {
+  const maxX = Math.max(16, window.innerWidth - 296);
+  return {
+    x: Math.min(Math.max(16, event.clientX + 14), maxX),
+    y: Math.max(16, event.clientY - 12),
+  };
+}
+
+function activityHoverPointFromElement(element: Element): ActivityHoverPoint {
+  const rect = element.getBoundingClientRect();
+  const maxX = Math.max(16, window.innerWidth - 296);
+  return {
+    x: Math.min(Math.max(16, rect.left + rect.width + 12), maxX),
+    y: Math.max(16, rect.top + rect.height / 2),
+  };
 }
 
 function activityColor(index: number): string {

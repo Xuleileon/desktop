@@ -189,12 +189,14 @@ describe('SettingsPane shortcut recorder', () => {
     if (!chromeSlice) throw new Error('Missing Chrome donut slice');
 
     act(() => {
-      chromeSlice.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      chromeSlice.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: 260, clientY: 180 }));
     });
 
-    const tooltip = container.querySelector('.activity-donut__tooltip');
+    const tooltip = container.querySelector<HTMLElement>('.activity-hover-popup');
     expect(tooltip?.textContent).toContain('Google Chrome');
     expect(tooltip?.textContent).toContain('30m');
+    expect(tooltip?.style.left).toBe('274px');
+    expect(tooltip?.style.top).toBe('168px');
     expect(container.querySelector('.activity-app-row--active .activity-app-row__name')?.textContent).toBe('Google Chrome');
 
     act(() => root.unmount());

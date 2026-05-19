@@ -3491,16 +3491,14 @@ button:focus:not(:focus-visible) {
   font-size: var(--font-size-2xs);
 }
 
-.activity-donut__tooltip {
-  position: absolute;
-  left: 50%;
-  bottom: -6px;
-  z-index: 2;
+.activity-hover-popup {
+  position: fixed;
+  z-index: 1000;
   display: grid;
   grid-template-columns: 24px minmax(0, auto) auto;
   align-items: center;
   gap: var(--space-2);
-  max-width: min(260px, calc(100vw - 56px));
+  max-width: min(280px, calc(100vw - 32px));
   padding: 7px 10px 7px 7px;
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-md);
@@ -3509,10 +3507,10 @@ button:focus:not(:focus-visible) {
     0 12px 28px rgba(var(--shadow-rgb), 0.28),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
   pointer-events: none;
-  transform: translate(-50%, 50%);
+  transform: translateY(-100%);
 }
 
-.activity-donut__tooltip-avatar {
+.activity-hover-popup__avatar {
   width: 24px;
   height: 24px;
   display: inline-flex;
@@ -3526,20 +3524,20 @@ button:focus:not(:focus-visible) {
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
 }
 
-.activity-donut__tooltip-avatar--icon {
+.activity-hover-popup__avatar--icon {
   overflow: hidden;
   background: transparent !important;
   box-shadow: none;
 }
 
-.activity-donut__tooltip-avatar img {
+.activity-hover-popup__avatar img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
 }
 
-.activity-donut__tooltip-name {
+.activity-hover-popup__name {
   min-width: 0;
   overflow: hidden;
   color: var(--color-fg-primary);
@@ -3550,7 +3548,7 @@ button:focus:not(:focus-visible) {
   white-space: nowrap;
 }
 
-.activity-donut__tooltip-time {
+.activity-hover-popup__time {
   color: var(--color-fg-tertiary);
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
