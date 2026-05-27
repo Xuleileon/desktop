@@ -16,6 +16,7 @@ import { HtmlBlock } from '../chat-v2/HtmlBlock';
 import { OptionList } from '../chat-v2/OptionList';
 import { AskForm } from '../chat-v2/AskForm';
 import { LoginForm } from '../chat-v2/LoginForm';
+import { CaptureBlock } from '../chat-v2/CaptureBlock';
 
 const USER_BUBBLE_CLAMP_LINES = 10;
 const USER_BUBBLE_CLAMP_CHARS = 600;
@@ -424,7 +425,7 @@ function StreamingProse({
   // `htmlview`, and `options` fences and emits structured events for
   // each. Cheap to run (regex-based, pure) — re-execute on every render.
   const events = extractAll([target]);
-  const hasStructuredBlock = events.some((e) => e.kind === 'html_block' || e.kind === 'option_list' || e.kind === 'ask_form' || e.kind === 'login_form');
+  const hasStructuredBlock = events.some((e) => e.kind === 'html_block' || e.kind === 'option_list' || e.kind === 'ask_form' || e.kind === 'login_form' || e.kind === 'capture_block');
   // Hook must run unconditionally (rules-of-hooks); result is only consumed
   // on the no-structured-block branch below.
   const shown = useTypewriter(target, 110, done);
@@ -470,6 +471,18 @@ function StreamingProse({
         if (e.kind === 'login_form') {
           return (
             <LoginForm
+              key={i}
+              payload={e.parsed}
+              complete={e.complete}
+              error={e.error}
+              sessionId={sessionId}
+              nextUserText={nextUserText}
+            />
+          );
+        }
+        if (e.kind === 'capture_block') {
+          return (
+            <CaptureBlock
               key={i}
               payload={e.parsed}
               complete={e.complete}
