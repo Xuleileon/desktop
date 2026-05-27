@@ -64,8 +64,18 @@ interface ReadyProps {
 }
 
 function CaptureReady({ payload, sessionId, streaming, nextUserText }: ReadyProps): React.ReactElement {
-  const { image, prompt, rows, cols } = payload;
+  const { image, prompt, target, targetImage, rows, cols } = payload;
   const tileCount = rows * cols;
+  // Three-line reCAPTCHA banner: small lead-in / big bold target /
+  // small trailer ("Click verify once there are none left."). When the
+  // agent emits an explicit `target`, we trust it and treat `prompt` as
+  // the lead. Otherwise we try to auto-split the prompt sentence to
+  // recover the same layout from Google's standard phrasing.
+  const parts = useMemo(
+    () => splitCapturePrompt(prompt, target),
+    [prompt, target],
+  );
+  const hasBanner = Boolean(parts.lead || parts.bold || parts.trailer);
 
   // Stable cache key so re-mounts in the same renderer session preserve state.
   const cacheKey = useMemo(
@@ -169,8 +179,23 @@ function CaptureReady({ payload, sessionId, streaming, nextUserText }: ReadyProp
       data-testid="chatv2-capture"
       data-state={streaming ? 'streaming' : submitted ? 'answered' : 'live'}
     >
-      {prompt && (
-        <div className="chatv2-capture__prompt">{prompt}</div>
+      {hasBanner && (
+        <div className="chatv2-capture__header" role="presentation">
+          <div className="chatv2-capture__header-text">
+            {parts.lead && <div className="chatv2-capture__header-prompt">{parts.lead}</div>}
+            {parts.bold && <div className="chatv2-capture__header-target">{parts.bold}</div>}
+            {parts.trailer && <div className="chatv2-capture__header-trailer">{parts.trailer}</div>}
+          </div>
+          {targetImage && (
+            <img
+              className="chatv2-capture__header-thumb"
+              src={targetImage}
+              alt=""
+              loading="lazy"
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+            />
+          )}
+        </div>
       )}
       <div
         ref={gridRef}
@@ -237,6 +262,61 @@ function CaptureReady({ payload, sessionId, streaming, nextUserText }: ReadyProp
       </div>
     </div>
   );
+}
+
+/**
+ * Split a reCAPTCHA-style prompt into the three banner lines Google uses:
+ *   - lead:    "Select all images with"
+ *   - bold:    "a fire hydrant"   (the target subject, rendered large/bold)
+ *   - trailer: "Click verify once there are none left."
+ *
+ * If the caller passed an explicit `target`, trust it and treat the rest of
+ * `prompt` as lead/trailer. Otherwise regex-split the prompt at the first
+ * "with X." pattern, which covers ~all standard challenges.
+ *
+ * Exported for tests.
+ */
+export function splitCapturePrompt(
+  prompt: string | undefined,
+  target: string | undefined,
+): { lead: string; bold: string; trailer: string } {
+  const p = (prompt || '').trim();
+  const t = (target || '').trim();
+
+  if (t) {
+    if (!p) return { lead: 'Select all images with', bold: t, trailer: '' };
+    // Try to find the target inside the prompt to recover lead/trailer.
+    const idx = p.toLowerCase().indexOf(t.toLowerCase());
+    if (idx >= 0) {
+      const lead = p.slice(0, idx).replace(/[\s.]+$/, '').trim();
+      const rest = p.slice(idx + t.length).replace(/^[\s.]+/, '').trim();
+      return { lead: lead || 'Select all images with', bold: t, trailer: rest };
+    }
+    return { lead: p, bold: t, trailer: '' };
+  }
+
+  if (!p) return { lead: '', bold: '', trailer: '' };
+
+  // Standard reCAPTCHA shape: "<lead> with <subject>. <trailer>"
+  const withPeriod = p.match(/^(.*?\bwith)\s+(.+?)\.\s*(.*)$/i);
+  if (withPeriod) {
+    return {
+      lead: withPeriod[1].trim(),
+      bold: withPeriod[2].trim(),
+      trailer: withPeriod[3].trim(),
+    };
+  }
+  // Shape without trailer sentence: "<lead> with <subject>"
+  const noPeriod = p.match(/^(.*?\bwith)\s+(.+)$/i);
+  if (noPeriod) {
+    return {
+      lead: noPeriod[1].trim(),
+      bold: noPeriod[2].trim(),
+      trailer: '',
+    };
+  }
+  // No recognizable shape — render the whole sentence at the small lead size.
+  return { lead: p, bold: '', trailer: '' };
 }
 
 /**

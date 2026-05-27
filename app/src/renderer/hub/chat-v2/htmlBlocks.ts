@@ -137,6 +137,13 @@ export interface LoginPayload {
 export interface CapturePayload {
   image: string;
   prompt?: string;
+  /** Bold subject for the reCAPTCHA-style header banner ("cars",
+   *  "motorcycles", etc.). Rendered emphasized; the renderer matches
+   *  Google's blue prompt bar. */
+  target?: string;
+  /** Optional example thumbnail shown on the right of the header
+   *  (matches the reCAPTCHA "find more like this" candidate image). */
+  targetImage?: string;
   rows: number;
   cols: number;
 }
@@ -389,10 +396,18 @@ export function parseCaptureBlock(raw: string): { parsed: CapturePayload | null;
   const colsRaw = typeof obj.cols === 'number' && Number.isFinite(obj.cols) ? Math.floor(obj.cols) : 3;
   const rows = Math.min(8, Math.max(1, rowsRaw));
   const cols = Math.min(8, Math.max(1, colsRaw));
+  const target = typeof obj.target === 'string' && obj.target.trim().length > 0 ? obj.target.trim() : undefined;
+  const targetImageRaw = typeof obj.targetImage === 'string' ? obj.targetImage.trim() : '';
+  // Only accept absolute http(s) URLs for targetImage (it goes straight
+  // into an <img src>). Drop anything else silently — the header still
+  // renders without the thumbnail.
+  const targetImage = targetImageRaw && isAbsoluteHttpUrl(targetImageRaw) ? targetImageRaw : undefined;
   return {
     parsed: {
       image,
       prompt: typeof obj.prompt === 'string' && obj.prompt.trim().length > 0 ? obj.prompt.trim() : undefined,
+      target,
+      targetImage,
       rows,
       cols,
     },

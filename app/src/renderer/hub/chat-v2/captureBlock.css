@@ -11,9 +11,17 @@
   clear: both;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0; /* banner + grid are flush; the rounded container handles edges */
   margin-top: 18px;
-  padding: 4px 0;
+  /* Hug the grid width rather than stretching across the chat surface.
+   * The grid itself maxes at 360px (see __grid below); the container
+   * inherits that so the bordered shell isn't oversized. */
+  width: fit-content;
+  max-width: min(360px, 100%);
+  background: var(--color-bg-base);
+  border: 1px solid var(--color-border-strong, var(--color-border, rgba(0, 0, 0, 0.22)));
+  border-radius: var(--radius-lg, 10px);
+  overflow: hidden;
 }
 
 .chatv2-capture__prompt {
@@ -24,6 +32,63 @@
   line-height: 1.35;
 }
 
+/* reCAPTCHA-style header — the blue banner that sits flush on top of the
+ * grid in Google's actual challenge UI. Two-column layout: prompt+target
+ * on the left, optional example thumbnail on the right. The header
+ * shares the grid's max-width and border-radius (top corners) so it
+ * reads as one continuous card with the tiles below. */
+.chatv2-capture__header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  background: #4285f4; /* reCAPTCHA prompt-bar blue */
+  color: #fff;
+}
+.chatv2-capture__header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.chatv2-capture__header-prompt {
+  font-size: 13px;
+  line-height: 1.25;
+  letter-spacing: 0.002em;
+  opacity: 0.92;
+}
+.chatv2-capture__header-target {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  text-transform: lowercase;
+}
+.chatv2-capture__header-trailer {
+  font-size: 13px;
+  line-height: 1.25;
+  letter-spacing: 0.002em;
+  opacity: 0.92;
+  margin-top: 2px;
+}
+.chatv2-capture__header-thumb {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 2px solid #fff;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  display: block;
+}
+
+/* Foot pads inside the bordered shell, like reCAPTCHA's toolbar area. */
+.chatv2-capture__foot {
+  padding: 12px 14px 14px;
+}
+
 .chatv2-capture__grid {
   display: grid;
   grid-template-columns: repeat(var(--cols, 3), 1fr);
@@ -32,9 +97,10 @@
   width: 100%;
   max-width: 360px;
   aspect-ratio: var(--cols, 3) / var(--rows, 3);
-  border-radius: 10px;
-  overflow: hidden;
-  background: var(--color-surface-2, #1a1a1a);
+  /* Grout lines between tiles. Uses bg-base so it flips with theme
+   * (white in light mode, near-black in dark) — matches Google's
+   * reCAPTCHA where the gutters read as the page background. */
+  background: var(--color-bg-base);
   outline: none;
 }
 
