@@ -21,34 +21,53 @@ their selection comes back to you as a new user turn.
 
 ## The reliable recipe — copy this
 
-reCAPTCHA's bframe iframe is same-origin with the parent (`google.com`
-→ `google.com`), so you can reach into its DOM directly via the parent
-page. Compute the grid rect from the **individual tile cells** —
+The bframe (`https://www.google.com/recaptcha/api2/bframe?...`) is
+**cross-origin with any third-party host** that embeds reCAPTCHA
+(Cloudflare-protected sites, 2captcha demos, etc.). You cannot reach
+its `contentDocument` from the parent page — you must attach to its
+CDP target and run the DOM queries inside that session.
+
+Compute the grid rect from the **individual tile cells** —
 *never* from the `<table>` element itself, because that element's
-bounding rect includes extra layout space (the floating toolbar
-sometimes sits absolutely positioned inside it, and certain
-challenge variants pad the table beyond the visible tile area).
+bounding rect includes extra layout space (the floating toolbar sometimes
+sits absolutely positioned inside it, and certain challenge variants
+pad the table beyond the visible tile area).
 
 ```js
 browser-harness-js <<'EOF'
 const fs = await import('fs')
 
-const r = await session.Runtime.evaluate({
+// 1. Attach to the bframe target so we can run DOM queries inside it
+//    regardless of origin policy.
+const targets = (await session.Target.getTargets()).targetInfos
+const bf = targets.find(t => t.type === 'iframe' && t.url.includes('/recaptcha/api2/bframe'))
+if (!bf) throw new Error('bframe target not found — is the challenge open?')
+const { sessionId: bframeSid } = await session.Target.attachToTarget(
+  { targetId: bf.targetId, flatten: true },
+)
+
+// 2. Resolve the bframe's outer rect *in the parent page* so we can
+//    translate inner-iframe coords back to page coords for screenshot
+//    clipping. Find the <iframe> element by src in the top-level DOM.
+const outerR = await session.Runtime.evaluate({
   expression: `JSON.stringify((() => {
-    // Locate the bframe and reach into its DOM (same origin).
-    const bf = Array.from(document.querySelectorAll('iframe'))
-      .find(el => el.src.includes('/recaptcha/api2/bframe'));
-    if (!bf) return { error: 'bframe not found' };
-    const ifRect = bf.getBoundingClientRect();
-    const doc = bf.contentDocument;
-    if (!doc) return { error: 'bframe content not accessible' };
+    const el = Array.from(document.querySelectorAll('iframe'))
+      .find(e => e.src.includes('/recaptcha/api2/bframe'));
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.x, y: r.y, w: r.width, h: r.height };
+  })())`,
+  returnByValue: true,
+})
+const outer = JSON.parse(outerR.result.value)
+if (!outer) throw new Error('bframe <iframe> element not found in parent DOM')
 
-    // The actual visible tile cells. Their union is the true 3×3 rect.
-    // Do NOT use .rc-imageselect-table-33 — it can be taller than its
-    // visible cells.
-    const tiles = Array.from(doc.querySelectorAll('td.rc-imageselect-tile'));
+// 3. Inside the bframe session, take the union of tile rects + read
+//    the challenge text. Returns inner-iframe coords; we add `outer`.
+const innerR = await cdp('Runtime.evaluate', {
+  expression: `JSON.stringify((() => {
+    const tiles = Array.from(document.querySelectorAll('td.rc-imageselect-tile'));
     if (tiles.length === 0) return { error: 'no tile cells (is challenge open?)' };
-
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const t of tiles) {
       const r = t.getBoundingClientRect();
@@ -58,31 +77,33 @@ const r = await session.Runtime.evaluate({
       if (r.x + r.width > maxX) maxX = r.x + r.width;
       if (r.y + r.height > maxY) maxY = r.y + r.height;
     }
-
-    // Derive grid shape from the tile count, not the table class name.
     const cols = Math.round(Math.sqrt(tiles.length)) === 4 ? 4 : 3;
     const rows = cols;
-
-    // Read the prompt + target text while we're inside the bframe.
-    const desc = doc.querySelector('.rc-imageselect-desc-no-canonical, .rc-imageselect-desc');
+    const desc = document.querySelector('.rc-imageselect-desc-no-canonical, .rc-imageselect-desc');
     const promptText = desc?.textContent?.trim() ?? '';
     const target = desc?.querySelector('strong')?.textContent?.trim() ?? '';
-    const candidateImg = doc.querySelector('.rc-imageselect-candidates img, .rc-canonical-bounding-box img');
+    const candidateImg = document.querySelector('.rc-imageselect-candidates img, .rc-canonical-bounding-box img');
     const targetImage = candidateImg?.src ?? null;
-
-    // Tile-union → parent-page coordinates.
     return {
-      grid: { x: ifRect.x + minX, y: ifRect.y + minY, w: maxX - minX, h: maxY - minY },
+      inner: { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
       rows, cols, promptText, target, targetImage,
     };
   })())`,
   returnByValue: true,
-})
-const info = JSON.parse(r.result.value)
+}, bframeSid)
+const info = JSON.parse(innerR.result.value)
 if (info.error) throw new Error(info.error)
-const { grid, rows, cols, promptText, target, targetImage } = info
 
-// Clip-screenshot to the tile union, in CSS pixels.
+// 4. Translate inner → parent-page coords.
+const grid = {
+  x: outer.x + info.inner.x,
+  y: outer.y + info.inner.y,
+  w: info.inner.w,
+  h: info.inner.h,
+}
+const { rows, cols, promptText, target, targetImage } = info
+
+// 5. Clip-screenshot to the tile union, in CSS pixels.
 const shot = await session.Page.captureScreenshot({
   format: 'png',
   clip: { x: grid.x, y: grid.y, width: grid.w, height: grid.h, scale: 1 },
@@ -128,41 +149,6 @@ see misaligned tiles and click the wrong cells.
 - **Reading the bframe rect too early.** Right after clicking the "I'm
   not a robot" checkbox the bframe is repositioning. Wait 500ms
   before measuring.
-
-## Reading the challenge text
-
-The prompt ("Select all images with cars") and the example thumbnail
-live inside the bframe — cross-origin, so you can't query them from
-the parent. Attach to the bframe via CDP:
-
-```js
-browser-harness-js <<'EOF'
-const targets = (await session.Target.getTargets()).targetInfos
-const bf = targets.find(t => t.type === 'iframe' && t.url.includes('/bframe'))
-const { sessionId } = await session.Target.attachToTarget({ targetId: bf.targetId, flatten: true })
-
-const r = await cdp('Runtime.evaluate', {
-  expression: `JSON.stringify((() => {
-    // The challenge header. ".rc-imageselect-desc-no-canonical" covers
-    // most prompts; ".rc-imageselect-desc" is the fallback shape.
-    const desc = document.querySelector('.rc-imageselect-desc-no-canonical, .rc-imageselect-desc')
-    const text = desc?.textContent?.trim() ?? ''
-    // Bold target ("cars") is in the inner <strong>.
-    const target = desc?.querySelector('strong')?.textContent?.trim() ?? ''
-    // Optional example thumbnail (some 4x4 challenges show one top-right).
-    const img = document.querySelector('.rc-imageselect-candidates img, .rc-imageselect-tileselected')
-    const targetImage = img?.src ?? null
-    return { text, target, targetImage }
-  })())`,
-  returnByValue: true,
-}, sessionId)
-return JSON.parse(r.result.value)
-EOF
-```
-
-Use `text` (everything before the bold word, e.g. "Select all images
-with") as `prompt`, the bold subject as `target`, and the thumbnail
-URL as `targetImage` (optional).
 
 ## Emit the fence
 
@@ -230,30 +216,6 @@ EOF
 | `targetImage` | optional | URL of the example thumbnail (some challenges show one). Renders on the right side of the header. |
 | `rows`        | optional | Default `3`. Set to `4` for the rare 4×4 challenge. |
 | `cols`        | optional | Default `3`. |
-
-## When the bframe layout is non-standard
-
-The constants above (32 / 120 / 336) cover the dark-themed, standard-
-sized challenge that ~99% of reCAPTCHA v2 traffic shows. If a
-screenshot using these comes back wrong (off-center, includes the
-prompt bar, or doesn't fill 9 tiles), attach to the bframe and read
-the grid's bounding rect directly:
-
-```js
-// inside the bframe CDP session you attached above
-const r = await cdp('Runtime.evaluate', {
-  expression: `JSON.stringify((() => {
-    const g = document.querySelector('.rc-imageselect-table-33, .rc-imageselect-table-44')
-    if (!g) return null
-    const r = g.getBoundingClientRect()
-    return { x: r.x, y: r.y, w: r.width, h: r.height }
-  })())`,
-  returnByValue: true,
-}, bframeSessionId)
-const inner = JSON.parse(r.result.value)
-// Add bframe outer offset to convert inner-iframe coords → page coords.
-const grid = { x: bf.x + inner.x, y: bf.y + inner.y, w: inner.w, h: inner.h }
-```
 
 ## "(none)" replies
 
