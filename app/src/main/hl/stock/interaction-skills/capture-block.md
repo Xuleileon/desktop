@@ -37,18 +37,9 @@ pad the table beyond the visible tile area).
 browser-harness-js <<'EOF'
 const fs = await import('fs')
 
-// 1. Attach to the bframe target so we can run DOM queries inside it
-//    regardless of origin policy.
-const targets = (await session.Target.getTargets()).targetInfos
-const bf = targets.find(t => t.type === 'iframe' && t.url.includes('/recaptcha/api2/bframe'))
-if (!bf) throw new Error('bframe target not found — is the challenge open?')
-const { sessionId: bframeSid } = await session.Target.attachToTarget(
-  { targetId: bf.targetId, flatten: true },
-)
-
-// 2. Resolve the bframe's outer rect *in the parent page* so we can
-//    translate inner-iframe coords back to page coords for screenshot
-//    clipping. Find the <iframe> element by src in the top-level DOM.
+// 1. Resolve the bframe's outer rect *in the parent page* first, before
+//    we route Runtime calls into the OOPIF.
+const parentTargetId = session.targetId
 const outerR = await session.Runtime.evaluate({
   expression: `JSON.stringify((() => {
     const el = Array.from(document.querySelectorAll('iframe'))
@@ -62,39 +53,54 @@ const outerR = await session.Runtime.evaluate({
 const outer = JSON.parse(outerR.result.value)
 if (!outer) throw new Error('bframe <iframe> element not found in parent DOM')
 
-// 3. Inside the bframe session, take the union of tile rects + read
-//    the challenge text. Returns inner-iframe coords; we add `outer`.
-const innerR = await cdp('Runtime.evaluate', {
-  expression: `JSON.stringify((() => {
-    const tiles = Array.from(document.querySelectorAll('td.rc-imageselect-tile'));
-    if (tiles.length === 0) return { error: 'no tile cells (is challenge open?)' };
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const t of tiles) {
-      const r = t.getBoundingClientRect();
-      if (r.width <= 0 || r.height <= 0) continue;
-      if (r.x < minX) minX = r.x;
-      if (r.y < minY) minY = r.y;
-      if (r.x + r.width > maxX) maxX = r.x + r.width;
-      if (r.y + r.height > maxY) maxY = r.y + r.height;
-    }
-    const cols = Math.round(Math.sqrt(tiles.length)) === 4 ? 4 : 3;
-    const rows = cols;
-    const desc = document.querySelector('.rc-imageselect-desc-no-canonical, .rc-imageselect-desc');
-    const promptText = desc?.textContent?.trim() ?? '';
-    const target = desc?.querySelector('strong')?.textContent?.trim() ?? '';
-    const candidateImg = document.querySelector('.rc-imageselect-candidates img, .rc-canonical-bounding-box img');
-    const targetImage = candidateImg?.src ?? null;
-    return {
-      inner: { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
-      rows, cols, promptText, target, targetImage,
-    };
-  })())`,
-  returnByValue: true,
-}, bframeSid)
-const info = JSON.parse(innerR.result.value)
-if (info.error) throw new Error(info.error)
+// 2. Route subsequent Runtime/DOM calls to the bframe target. See
+//    cross-origin-iframes.md — `session.use(targetId)` auto-attaches
+//    and works whether the bframe is same-origin or cross-origin.
+const { targetInfos } = await session.Target.getTargets({})
+const bframeTarget = targetInfos.find(
+  t => t.type === 'iframe' && t.url.includes('/recaptcha/api2/bframe'),
+)
+if (!bframeTarget) throw new Error('bframe target not found — is the challenge open?')
+await session.use(bframeTarget.targetId)
 
-// 4. Translate inner → parent-page coords.
+try {
+  // 3. Inside the bframe target: tile-union rect + challenge text.
+  //    Returns inner-iframe coords; we add `outer` once back outside.
+  const innerR = await session.Runtime.evaluate({
+    expression: `JSON.stringify((() => {
+      const tiles = Array.from(document.querySelectorAll('td.rc-imageselect-tile'));
+      if (tiles.length === 0) return { error: 'no tile cells (is challenge open?)' };
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const t of tiles) {
+        const r = t.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) continue;
+        if (r.x < minX) minX = r.x;
+        if (r.y < minY) minY = r.y;
+        if (r.x + r.width > maxX) maxX = r.x + r.width;
+        if (r.y + r.height > maxY) maxY = r.y + r.height;
+      }
+      const cols = Math.round(Math.sqrt(tiles.length)) === 4 ? 4 : 3;
+      const rows = cols;
+      const desc = document.querySelector('.rc-imageselect-desc-no-canonical, .rc-imageselect-desc');
+      const promptText = desc?.textContent?.trim() ?? '';
+      const target = desc?.querySelector('strong')?.textContent?.trim() ?? '';
+      const candidateImg = document.querySelector('.rc-imageselect-candidates img, .rc-canonical-bounding-box img');
+      const targetImage = candidateImg?.src ?? null;
+      return {
+        inner: { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
+        rows, cols, promptText, target, targetImage,
+      };
+    })())`,
+    returnByValue: true,
+  })
+  var info = JSON.parse(innerR.result.value)
+  if (info.error) throw new Error(info.error)
+} finally {
+  // 4. Always route back to the parent before the next Page.* call.
+  await session.use(parentTargetId)
+}
+
+// 5. Translate inner → parent-page coords.
 const grid = {
   x: outer.x + info.inner.x,
   y: outer.y + info.inner.y,
@@ -103,7 +109,7 @@ const grid = {
 }
 const { rows, cols, promptText, target, targetImage } = info
 
-// 5. Clip-screenshot to the tile union, in CSS pixels.
+// 6. Clip-screenshot to the tile union, in CSS pixels.
 const shot = await session.Page.captureScreenshot({
   format: 'png',
   clip: { x: grid.x, y: grid.y, width: grid.w, height: grid.h, scale: 1 },
