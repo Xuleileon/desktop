@@ -145,7 +145,14 @@ function CaptureReady({ payload, sessionId, streaming, nextUserText }: ReadyProp
     setSubmitted(true);
     setSubmitError(null);
     try {
-      const result = await window.electronAPI?.sessions?.resume(sessionId, message);
+      const resume = window.electronAPI?.sessions?.resume;
+      if (!resume) {
+        setSubmitError('sessions bridge unavailable');
+        setSubmitted(false);
+        setLocalSubmit(false);
+        return;
+      }
+      const result = await resume(sessionId, message);
       if (result?.error) {
         setSubmitError(result.error);
         setSubmitted(false);
