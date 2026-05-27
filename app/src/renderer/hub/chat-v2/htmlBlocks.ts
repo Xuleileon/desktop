@@ -113,13 +113,27 @@ export interface AskFormPayload {
   questions: AskQuestion[];
 }
 
-export type FenceTag = 'html' | 'htmlview' | 'options' | 'ask';
+/**
+ * Payload for a ```login fence — credential collection during browsing.
+ * `site` is the brand token (e.g. "Amazon", not "amazon.com"). `url` is
+ * required so the manual-login escape hatch knows where to deep-link.
+ */
+export interface LoginPayload {
+  site: string;
+  url: string;
+  prompt?: string;
+  usernameLabel?: string;
+  passwordLabel?: string;
+}
+
+export type FenceTag = 'html' | 'htmlview' | 'options' | 'ask' | 'login';
 
 export type ExtractEvent =
   | { kind: 'text'; text: string }
   | { kind: 'html_block'; content: string; tag: 'html' | 'htmlview'; complete: boolean }
   | { kind: 'option_list'; complete: boolean; raw: string; parsed: OptionListPayload | null; error?: string }
-  | { kind: 'ask_form'; complete: boolean; raw: string; parsed: AskFormPayload | null; error?: string };
+  | { kind: 'ask_form'; complete: boolean; raw: string; parsed: AskFormPayload | null; error?: string }
+  | { kind: 'login_form'; complete: boolean; raw: string; parsed: LoginPayload | null; error?: string };
 
 /**
  * Stateful, chunk-fed extractor. Safe to call `feed` once per streamed
@@ -244,8 +258,8 @@ export function extractAll(chunks: string[]): ExtractEvent[] {
  * newline arrives in the next chunk); LAX also accepts end-of-input
  * (used only during the final `end()` flush).
  */
-const OPENER_STRICT = /(^|\n)```(html|htmlview|options|ask)[ \t]*\r?\n/;
-const OPENER_LAX = /(^|\n)```(html|htmlview|options|ask)[ \t]*(\r?\n|$)/;
+const OPENER_STRICT = /(^|\n)```(html|htmlview|options|ask|login)[ \t]*\r?\n/;
+const OPENER_LAX = /(^|\n)```(html|htmlview|options|ask|login)[ \t]*(\r?\n|$)/;
 
 function findOpener(buf: string, flush: boolean): { start: number; end: number; tag: FenceTag } | null {
   const re = flush ? OPENER_LAX : OPENER_STRICT;
@@ -321,7 +335,43 @@ function emitBlock(tag: FenceTag, content: string, complete: boolean): ExtractEv
     const { parsed, error } = parseAskForm(content, { partial: !complete });
     return { kind: 'ask_form', complete, raw: content, parsed, error };
   }
+  if (tag === 'login') {
+    const { parsed, error } = parseLoginBlock(content);
+    return { kind: 'login_form', complete, raw: content, parsed, error };
+  }
   return { kind: 'html_block', content, tag: tag as 'html' | 'htmlview', complete };
+}
+
+/**
+ * Parse + validate a login block body. The payload is a small flat object;
+ * there's no partial-streaming path because the body is tiny and the form
+ * has nothing useful to render until the closing fence resolves the JSON.
+ */
+export function parseLoginBlock(raw: string): { parsed: LoginPayload | null; error?: string } {
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return { parsed: null, error: 'invalid json' };
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return { parsed: null, error: 'expected json object at top level' };
+  }
+  const obj = data as Record<string, unknown>;
+  const site = typeof obj.site === 'string' ? obj.site.trim() : '';
+  const url = typeof obj.url === 'string' ? obj.url.trim() : '';
+  if (!site) return { parsed: null, error: 'missing required field "site"' };
+  if (!url) return { parsed: null, error: 'missing required field "url"' };
+  if (!isAbsoluteHttpUrl(url)) return { parsed: null, error: 'url must be an absolute http(s) URL' };
+  return {
+    parsed: {
+      site,
+      url,
+      prompt: typeof obj.prompt === 'string' && obj.prompt.trim().length > 0 ? obj.prompt.trim() : undefined,
+      usernameLabel: typeof obj.usernameLabel === 'string' && obj.usernameLabel.trim().length > 0 ? obj.usernameLabel.trim() : undefined,
+      passwordLabel: typeof obj.passwordLabel === 'string' && obj.passwordLabel.trim().length > 0 ? obj.passwordLabel.trim() : undefined,
+    },
+  };
 }
 
 /**
