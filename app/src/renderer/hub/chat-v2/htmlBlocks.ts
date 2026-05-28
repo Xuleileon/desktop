@@ -148,7 +148,28 @@ export interface CapturePayload {
   cols: number;
 }
 
-export type FenceTag = 'html' | 'htmlview' | 'options' | 'ask' | 'login' | 'capture';
+/**
+ * Payload for an ```iframe fence — embeds an arbitrary http(s) URL in a
+ * sandboxed <iframe> directly inside the chat turn. The agent uses this
+ * to surface a piece of the page it's already navigating (a captcha
+ * bframe, a checkout step, an OAuth consent screen) so the user can
+ * interact with the real thing rather than a screenshot+proxy. The
+ * agent's browser session is unrelated to whatever cookies/state the
+ * embedded frame establishes inside the renderer — see iframe-block.md
+ * for the (sometimes severe) limitations.
+ */
+export interface IframePayload {
+  url: string;
+  prompt?: string;
+  /** Pixel width of the embedded frame. Clamped to [200, 1200]. */
+  width: number;
+  /** Pixel height of the embedded frame. Clamped to [200, 900]. */
+  height: number;
+  /** Submit-button label shown below the frame. Default "I'm done". */
+  submitLabel?: string;
+}
+
+export type FenceTag = 'html' | 'htmlview' | 'options' | 'ask' | 'login' | 'capture' | 'iframe';
 
 export type ExtractEvent =
   | { kind: 'text'; text: string }
@@ -156,7 +177,8 @@ export type ExtractEvent =
   | { kind: 'option_list'; complete: boolean; raw: string; parsed: OptionListPayload | null; error?: string }
   | { kind: 'ask_form'; complete: boolean; raw: string; parsed: AskFormPayload | null; error?: string }
   | { kind: 'login_form'; complete: boolean; raw: string; parsed: LoginPayload | null; error?: string }
-  | { kind: 'capture_block'; complete: boolean; raw: string; parsed: CapturePayload | null; error?: string };
+  | { kind: 'capture_block'; complete: boolean; raw: string; parsed: CapturePayload | null; error?: string }
+  | { kind: 'iframe_block'; complete: boolean; raw: string; parsed: IframePayload | null; error?: string };
 
 /**
  * Stateful, chunk-fed extractor. Safe to call `feed` once per streamed
@@ -281,8 +303,8 @@ export function extractAll(chunks: string[]): ExtractEvent[] {
  * newline arrives in the next chunk); LAX also accepts end-of-input
  * (used only during the final `end()` flush).
  */
-const OPENER_STRICT = /(^|\n)```(html|htmlview|options|ask|login|capture)[ \t]*\r?\n/;
-const OPENER_LAX = /(^|\n)```(html|htmlview|options|ask|login|capture)[ \t]*(\r?\n|$)/;
+const OPENER_STRICT = /(^|\n)```(html|htmlview|options|ask|login|capture|iframe)[ \t]*\r?\n/;
+const OPENER_LAX = /(^|\n)```(html|htmlview|options|ask|login|capture|iframe)[ \t]*(\r?\n|$)/;
 
 function findOpener(buf: string, flush: boolean): { start: number; end: number; tag: FenceTag } | null {
   const re = flush ? OPENER_LAX : OPENER_STRICT;
@@ -366,7 +388,46 @@ function emitBlock(tag: FenceTag, content: string, complete: boolean): ExtractEv
     const { parsed, error } = parseCaptureBlock(content);
     return { kind: 'capture_block', complete, raw: content, parsed, error };
   }
+  if (tag === 'iframe') {
+    const { parsed, error } = parseIframeBlock(content);
+    return { kind: 'iframe_block', complete, raw: content, parsed, error };
+  }
   return { kind: 'html_block', content, tag: tag as 'html' | 'htmlview', complete };
+}
+
+/**
+ * Parse + validate an iframe block body. Tiny flat JSON; the renderer
+ * has nothing useful to show until the URL is in hand, so no streaming
+ * partial path.
+ */
+export function parseIframeBlock(raw: string): { parsed: IframePayload | null; error?: string } {
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return { parsed: null, error: 'invalid json' };
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return { parsed: null, error: 'expected json object at top level' };
+  }
+  const obj = data as Record<string, unknown>;
+  const url = typeof obj.url === 'string' ? obj.url.trim() : '';
+  if (!url) return { parsed: null, error: 'missing required field "url"' };
+  if (!isAbsoluteHttpUrl(url)) return { parsed: null, error: 'url must be an absolute http(s) URL' };
+  const widthRaw = typeof obj.width === 'number' && Number.isFinite(obj.width) ? Math.floor(obj.width) : 400;
+  const heightRaw = typeof obj.height === 'number' && Number.isFinite(obj.height) ? Math.floor(obj.height) : 500;
+  return {
+    parsed: {
+      url,
+      prompt: typeof obj.prompt === 'string' && obj.prompt.trim().length > 0 ? obj.prompt.trim() : undefined,
+      width: Math.min(1200, Math.max(200, widthRaw)),
+      height: Math.min(900, Math.max(200, heightRaw)),
+      submitLabel:
+        typeof obj.submitLabel === 'string' && obj.submitLabel.trim().length > 0
+          ? obj.submitLabel.trim()
+          : undefined,
+    },
+  };
 }
 
 /**
