@@ -1,6 +1,7 @@
 import path from 'path';
 import { execFileSync } from 'child_process';
 import fs from 'fs';
+import { createHash } from 'crypto';
 import type { ForgeConfig } from '@electron-forge/shared-types';
 import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { MakerDMG } from '@electron-forge/maker-dmg';
@@ -54,6 +55,34 @@ const runNpm = (args: string[], cwd: string): void => {
   }
   execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, { cwd, stdio: 'inherit' });
 };
+
+function packageDepsCacheDir(electronVersion: string): string {
+  const lockPath = ['package-lock.json', 'bun.lock', 'npm-shrinkwrap.json']
+    .map((name) => path.resolve(__dirname, name))
+    .find((candidate) => fs.existsSync(candidate)) ?? path.resolve(__dirname, 'package.json');
+  const lockHash = createHash('sha256').update(fs.readFileSync(lockPath)).digest('hex').slice(0, 16);
+  return path.resolve(__dirname, 'out', '.package-deps-cache', `${process.platform}-${process.arch}-electron-${electronVersion}-${lockHash}`);
+}
+
+function hardlinkTree(source: string, destination: string): void {
+  fs.mkdirSync(destination, { recursive: true });
+  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+    const src = path.join(source, entry.name);
+    const dest = path.join(destination, entry.name);
+    if (entry.isDirectory()) {
+      hardlinkTree(src, dest);
+    } else if (entry.isSymbolicLink()) {
+      try {
+        fs.symlinkSync(fs.readlinkSync(src), dest, process.platform === 'win32' ? 'junction' : undefined);
+      } catch {
+        fs.copyFileSync(fs.realpathSync(src), dest);
+      }
+    } else {
+      try { fs.linkSync(src, dest); }
+      catch { fs.copyFileSync(src, dest); }
+    }
+  }
+}
 
 function isViteOutputPath(file: string): boolean {
   const normalized = file.split(path.sep).join('/');
@@ -133,18 +162,41 @@ const config: ForgeConfig = {
       const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
       const prodDeps = Object.keys(pkg.dependencies ?? {});
       if (prodDeps.length === 0) return;
-      runNpm(['install', '--omit=dev', '--no-package-lock', '--no-save', '--legacy-peer-deps', ...prodDeps], buildPath);
+      const cacheDir = packageDepsCacheDir(electronVersion);
+      const cachedNodeModules = path.join(cacheDir, 'node_modules');
+      const buildNodeModules = path.join(buildPath, 'node_modules');
+      const cacheReady = path.join(cacheDir, '.ready');
+      if (fs.existsSync(cacheReady) && fs.existsSync(cachedNodeModules)) {
+        fs.rmSync(buildNodeModules, { recursive: true, force: true });
+        hardlinkTree(cachedNodeModules, buildNodeModules);
+      } else {
+        runNpm([
+          'install', '--omit=dev', '--no-package-lock', '--no-save', '--legacy-peer-deps',
+          '--prefer-offline', '--no-audit', '--no-fund', ...prodDeps,
+        ], buildPath);
+      }
       // npm install just built native modules against the host Node ABI.
       // Electron uses a different NODE_MODULE_VERSION, so rebuild them
       // against Electron's headers before asar packaging.
-      const { rebuild } = await import('@electron/rebuild');
-      await rebuild({ buildPath, electronVersion, arch: process.arch });
+      if (!fs.existsSync(cacheReady)) {
+        const { rebuild } = await import('@electron/rebuild');
+        await rebuild({ buildPath, electronVersion, arch: process.arch });
+      }
       // npm (like yarn) drops the executable bit off node-pty's spawn-helper.
       // Restore it on the packaged tree so `codex login` doesn't crash with
       // `posix_spawnp failed` the first time a user opens onboarding.
       execFileSync(process.execPath, [path.resolve(__dirname, 'scripts/chmod-node-pty-helpers.mjs'), buildPath], {
         stdio: 'inherit',
       });
+      if (!fs.existsSync(cacheReady)) {
+        const pendingCache = `${cacheDir}.tmp-${process.pid}`;
+        fs.rmSync(pendingCache, { recursive: true, force: true });
+        fs.mkdirSync(pendingCache, { recursive: true });
+        fs.cpSync(buildNodeModules, path.join(pendingCache, 'node_modules'), { recursive: true });
+        fs.writeFileSync(path.join(pendingCache, '.ready'), electronVersion, 'utf8');
+        fs.rmSync(cacheDir, { recursive: true, force: true });
+        fs.renameSync(pendingCache, cacheDir);
+      }
     },
 
     // Ad-hoc sign the .app on macOS for unsigned builds. macOS 26 refuses

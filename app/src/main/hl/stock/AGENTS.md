@@ -181,6 +181,8 @@ Verify after every meaningful browser action:
 - Use `session.Runtime.evaluate({ expression, returnByValue: true })` for page
   state.
 - Use `session.waitFor(method, predicate, timeoutMs)` for protocol events.
+- Subscribe to protocol events with `session.onEvent(...)`; `session.on(...)`
+  is not part of Browser Harness JS.
 
 For screenshots:
 
@@ -220,6 +222,9 @@ chat without giving the user new information.
 - Uploads from the user appear under `./uploads/<session_id>/`.
 - Files you create for the user must go under `./outputs/<session_id>/`.
   Mention the filename in your final answer.
+- The `read` tool only reads files that already exist; it never creates or
+  writes them. Create an output first with a shell command or `Bun.write`, then
+  read it only if verification is useful.
 
 ## Local App Diagnostics
 
