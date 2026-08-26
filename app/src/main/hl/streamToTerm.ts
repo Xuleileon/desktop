@@ -132,6 +132,11 @@ export function hlEventToTermBytes(event: HlEvent, state: TermTranslatorState): 
       return finish();
     }
 
+    case 'text': {
+      out.push(event.text.replace(/\r?\n/g, '\r\n'));
+      return finish();
+    }
+
     case 'user_input': {
       // Follow-up prompts need a leading newline so they start on their
       // own line — previous events (`done`, summaries) suppress their

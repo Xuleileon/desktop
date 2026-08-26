@@ -236,6 +236,10 @@ interface ChatTurnProps {
   /** Threaded through to UserBubble so it can fetch attachments persisted
    *  in session_attachments for this turn's `attachmentTurnIndex`. */
   sessionId?: string;
+  /** Agent engine that produced the turn. Pi emits distinct assistant text
+   *  and internal thinking events while legacy engines still stream through
+   *  the historical thinking event. */
+  engine?: string;
   /** Text of the user's reply that follows this turn (i.e. the next turn's
    *  userEntry.content). Forwarded to OptionList/AskForm so they can detect
    *  historical submissions from the transcript itself — no client cache. */
@@ -674,9 +678,14 @@ function AgentEntry({
 }): React.ReactElement | null {
   switch (entry.type) {
     case 'thinking':
-      // Intermediate thinking (between tool calls). The trailing live thinking
-      // is intercepted before reaching here and rendered via <StreamingProse>.
       return <div className="chat-step__thinking"><Linkify>{entry.content}</Linkify></div>;
+
+    case 'text':
+      return (
+        <div className="chat-step__assistant">
+          <Markdown source={entry.content} />
+        </div>
+      );
 
     case 'tool_call':
       return <ToolBlock entry={entry} />;
@@ -758,9 +767,9 @@ function normalizeProse(s: string): string {
   return (s || '').trim().replace(/\s+/g, ' ');
 }
 
-function renderAgentEntries(entries: OutputEntry[], isLive: boolean, sessionId?: string, nextUserText?: string | null): React.ReactElement[] {
+function renderAgentEntries(entries: OutputEntry[], isLive: boolean, sessionId?: string, nextUserText?: string | null, engine?: string): React.ReactElement[] {
   // Find the trailing prose target: the last `done`, or the trailing live
-  // `thinking` if no `done` has landed yet. Both get suppressed from regular
+  // assistant text if no `done` has landed yet. Both get suppressed from regular
   // per-entry rendering and collapsed into a single <StreamingProse> at the
   // tail, with a stable key so the typewriter cursor persists across the
   // thinking→done swap.
@@ -768,11 +777,17 @@ function renderAgentEntries(entries: OutputEntry[], isLive: boolean, sessionId?:
   for (let i = entries.length - 1; i >= 0; i--) {
     if (entries[i].type === 'done') { lastDoneIdx = i; break; }
   }
-  let trailingThinkingIdx = -1;
-  if (lastDoneIdx === -1 && entries.length > 0 && entries[entries.length - 1].type === 'thinking') {
-    trailingThinkingIdx = entries.length - 1;
+  let trailingTextIdx = -1;
+  if (lastDoneIdx === -1 && entries.length > 0 && entries[entries.length - 1].type === 'text') {
+    trailingTextIdx = entries.length - 1;
   }
-  const proseTargetIdx = lastDoneIdx >= 0 ? lastDoneIdx : trailingThinkingIdx;
+  // Older adapters still use `thinking` for assistant prose. Keep that legacy
+  // path while Pi emits a distinct `text` event for its final answer.
+  let trailingLegacyThinkingIdx = -1;
+  if (engine !== 'pi' && lastDoneIdx === -1 && trailingTextIdx === -1 && entries.length > 0 && entries[entries.length - 1].type === 'thinking') {
+    trailingLegacyThinkingIdx = entries.length - 1;
+  }
+  const proseTargetIdx = lastDoneIdx >= 0 ? lastDoneIdx : (trailingTextIdx >= 0 ? trailingTextIdx : trailingLegacyThinkingIdx);
   const proseTarget = proseTargetIdx >= 0 ? entries[proseTargetIdx].content : '';
   // Prose counts as "done" if a done event landed OR if this turn isn't the
   // live one (session is idle/stopped/paused, or this isn't the trailing turn).
@@ -841,7 +856,7 @@ function renderAgentEntries(entries: OutputEntry[], isLive: boolean, sessionId?:
     // `thinking` event AND a `done.summary` — which renders twice. When the
     // immediately-following entry is `done` with identical content, skip the
     // thinking so the markdown-rendered `done` wins.
-    if (e.type === 'thinking') {
+    if (e.type === 'thinking' || e.type === 'text') {
       const next = entries[i + 1];
       if (next && next.type === 'done' && normalizeProse(next.content) === normalizeProse(e.content)) {
         continue;
@@ -911,7 +926,7 @@ function InflightLabel({ since }: { since: number }): React.ReactElement {
   );
 }
 
-export function ChatTurn({ turn, inflightSince, onEditMessage, onShare, isLatest, sessionId, nextUserText }: ChatTurnProps): React.ReactElement {
+export function ChatTurn({ turn, inflightSince, onEditMessage, onShare, isLatest, sessionId, nextUserText, engine }: ChatTurnProps): React.ReactElement {
   const showInflight = inflightSince !== undefined;
   return (
     <div className={`chat-turn${isLatest ? ' chat-turn--latest' : ''}`}>
@@ -927,7 +942,7 @@ export function ChatTurn({ turn, inflightSince, onEditMessage, onShare, isLatest
       {(showInflight || turn.agentEntries.length > 0 || isLatest) && (
         <div className="chat-agent">
           {showInflight && <InflightLabel since={inflightSince!} />}
-          {renderAgentEntries(turn.agentEntries, showInflight, sessionId, nextUserText)}
+          {renderAgentEntries(turn.agentEntries, showInflight, sessionId, nextUserText, engine)}
           {!showInflight && isLatest && (
             <AssistantActions
               content={turn.agentEntries.find((e) => e.type === 'done')?.content ?? ''}

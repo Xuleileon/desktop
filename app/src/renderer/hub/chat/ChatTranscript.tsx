@@ -66,10 +66,10 @@ export const ChatTranscript = forwardRef<HTMLDivElement, ChatTranscriptProps>(fu
   // Subscribe only to this session's output + createdAt. Other sessions'
   // updates do not re-render this component.
   const sessionSlice = useSessionsStore(
-    useShallow((s): { output: AgentSession['output']; outputTimestamps: number[] | undefined; createdAt: number; status: AgentSession['status']; prompt: string } | null => {
+    useShallow((s): { output: AgentSession['output']; outputTimestamps: number[] | undefined; createdAt: number; status: AgentSession['status']; prompt: string; engine?: string } | null => {
       const sess = s.byId[sessionId];
       if (!sess) return null;
-      return { output: sess.output, outputTimestamps: sess.outputTimestamps, createdAt: sess.createdAt, status: sess.status, prompt: sess.prompt };
+      return { output: sess.output, outputTimestamps: sess.outputTimestamps, createdAt: sess.createdAt, status: sess.status, prompt: sess.prompt, engine: sess.engine };
     }),
   );
 
@@ -95,6 +95,7 @@ export const ChatTranscript = forwardRef<HTMLDivElement, ChatTranscriptProps>(fu
       createdAt: sessionSlice.createdAt,
       output: sessionSlice.output,
       outputTimestamps: sessionSlice.outputTimestamps,
+      engine: sessionSlice.engine,
     };
     const { entries } = adaptSession(fake);
     // The event log is the source of truth for user turns. Only synthesize the
@@ -285,6 +286,7 @@ export const ChatTranscript = forwardRef<HTMLDivElement, ChatTranscriptProps>(fu
           key={t.id}
           turn={t}
           sessionId={sessionId}
+          engine={sessionSlice.engine}
           inflightSince={showThinking && i === turns.length - 1 ? since : undefined}
           onEditMessage={i === firstUserTurnIdx ? onEditMessage : undefined}
           onShare={i === firstUserTurnIdx ? onShare : undefined}

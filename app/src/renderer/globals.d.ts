@@ -181,6 +181,7 @@ interface ElectronChromeImportAPI {
 
 interface ElectronOnAPI {
   sessionUpdated: (cb: (session: import('./hub/types').AgentSession) => void) => () => void;
+  sessionDeleted: (cb: (id: string) => void) => () => void;
   sessionBrowserGone: (cb: (id: string) => void) => () => void;
   sessionBrowserAttached: (cb: (id: string) => void) => () => void;
   sessionOutput: (cb: (id: string, event: import('./hub/types').HlEvent) => void) => () => void;

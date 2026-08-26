@@ -104,7 +104,8 @@ export function fromHlEvents(
         break;
       }
 
-      case 'thinking': {
+      case 'thinking':
+      case 'text': {
         // NB: the legacy `thinking` HlEvent carries the assistant's streaming
         // *output text* (claude-code `content_block_delta.text_delta`, codex
         // `agent_message`, etc.) — not chain-of-thought. Map it to a `text`
@@ -278,7 +279,8 @@ export function fromHlEvents(
 
 function summarizeEvent(evt: HlEvent): string {
   switch (evt.type) {
-    case 'thinking': return `${evt.text.slice(0, 40)}${evt.text.length > 40 ? '...' : ''}`;
+    case 'thinking':
+    case 'text': return `${evt.text.slice(0, 40)}${evt.text.length > 40 ? '...' : ''}`;
     case 'tool_call': return `${evt.name}#${evt.iteration}`;
     case 'tool_result': return `${evt.name} ok=${evt.ok} ms=${evt.ms}`;
     case 'user_input': return `${evt.text.slice(0, 40)}${evt.text.length > 40 ? '...' : ''}`;

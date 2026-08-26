@@ -23,6 +23,7 @@ import type { AgentSession, HlEvent } from '../../shared/session-schemas';
 
 export interface SessionEvents {
   'session-created': (session: AgentSession) => void;
+  'session-deleted': (id: string) => void;
   'session-updated': (session: AgentSession) => void;
   'session-completed': (session: AgentSession) => void;
   'session-error': (session: AgentSession) => void;

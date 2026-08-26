@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { BrowserWindow } from 'electron';
-import { BrowserPool } from '../../../src/main/sessions/BrowserPool';
+import { BrowserPool, isSafeTopLevelUrl } from '../../../src/main/sessions/BrowserPool';
 import { contentViewStub } from '../../fixtures/electron-mock';
 
 type MockWindow = {
@@ -151,6 +151,21 @@ describe('BrowserPool — creation', () => {
 
     expect(onInterruptShortcut).not.toHaveBeenCalled();
     expect(preventDefault).not.toHaveBeenCalled();
+  });
+
+  it('blocks custom protocols before Windows can open an app picker', () => {
+    const view = pool.create('s1');
+    const preventDefault = vi.fn();
+
+    (view!.webContents as unknown as { emit: (event: string, ...args: unknown[]) => boolean }).emit(
+      'will-navigate',
+      { preventDefault },
+      'bitbrowser://open/client',
+    );
+
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(isSafeTopLevelUrl('https://www.douyin.com/')).toBe(true);
+    expect(isSafeTopLevelUrl('bitbrowser://open/client')).toBe(false);
   });
 });
 

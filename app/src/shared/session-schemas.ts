@@ -16,6 +16,11 @@ export const HlEventThinkingSchema = z.object({
   text: z.string(),
 });
 
+export const HlEventTextSchema = z.object({
+  type: z.literal('text'),
+  text: z.string(),
+});
+
 export const HlEventToolCallSchema = z.object({
   type: z.literal('tool_call'),
   name: z.string(),
@@ -107,6 +112,7 @@ export const HlEventTurnUsageSchema = z.object({
 
 export const HlEventSchema = z.discriminatedUnion('type', [
   HlEventThinkingSchema,
+  HlEventTextSchema,
   HlEventToolCallSchema,
   HlEventToolResultSchema,
   HlEventDoneSchema,

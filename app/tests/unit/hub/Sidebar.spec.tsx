@@ -163,4 +163,27 @@ describe('Sidebar focus behavior', () => {
 
     act(() => root.unmount());
   });
+
+  it('offers delete as a separated destructive action', async () => {
+    installPopupApi();
+    const idle = session('idle', 1, 'idle');
+    const { container, root, onRowAction } = renderSidebar([idle]);
+
+    click(menuButton(container));
+    await flush();
+
+    const request = lastPopupRequest;
+    expect(request?.kind).toBe('menu');
+    if (request?.kind !== 'menu') throw new Error('Expected menu popup');
+    expect(request.items.at(-1)).toMatchObject({
+      id: 'delete',
+      label: 'Delete',
+      tone: 'danger',
+      separatorBefore: true,
+    });
+    selectPopupItem('delete');
+    expect(onRowAction).toHaveBeenCalledWith('idle', 'delete');
+
+    act(() => root.unmount());
+  });
 });

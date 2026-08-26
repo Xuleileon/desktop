@@ -741,6 +741,11 @@ app.whenReady().then(async () => {
     }
     if (session.status !== 'stuck') notifiedStuck.delete(session.id);
   });
+  sessionManager.onEvent('session-deleted', (id) => {
+    notifiedStarted.delete(id);
+    notifiedStuck.delete(id);
+    shellWindow?.webContents.send('session-deleted', id);
+  });
   sessionManager.onEvent('session-completed', (session) => {
     shellWindow?.webContents.send('session-updated', session);
     sendToPill('session-updated', session);

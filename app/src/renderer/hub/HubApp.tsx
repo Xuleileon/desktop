@@ -463,6 +463,26 @@ export function HubApp(): React.ReactElement {
     console.log('[HubApp] selectSession', { id });
   }, [sessions]);
 
+  const handleDeleteSession = useCallback(async (id: string) => {
+    const session = sessions.find((candidate) => candidate.id === id);
+    if (!session) return;
+    const confirmed = window.confirm(tr(
+      `Delete “${session.prompt}”? This cannot be undone.`,
+      `确定删除“${session.prompt}”吗？此操作无法撤销。`,
+    ));
+    if (!confirmed) return;
+    try {
+      await window.electronAPI?.sessions.delete(id);
+      if (chatSessionId === id) {
+        setChatSession(null);
+        setViewMode('dashboard');
+      }
+      setFocusIndex((index) => Math.max(0, Math.min(index, sessions.length - 2)));
+    } catch (err) {
+      console.error('[HubApp] delete failed', err);
+    }
+  }, [chatSessionId, sessions, setChatSession, setViewMode, tr]);
+
   const selectedSessionId = sessions[focusIndex]?.id ?? null;
 
   return (
@@ -506,6 +526,9 @@ export function HubApp(): React.ReactElement {
               break;
             case 'resume':
               handleResume(id);
+              break;
+            case 'delete':
+              void handleDeleteSession(id);
               break;
           }
         }}

@@ -549,6 +549,7 @@ export class SessionManager extends EventEmitter {
     this.termStates.delete(id);
     this.db.deleteSession(id);
     mainLogger.info('SessionManager.deleteSession', { id });
+    this.emitEvent('session-deleted', id);
   }
 
   rerunSession(id: string, kickoffOverride?: string): AbortController {
@@ -833,6 +834,7 @@ export class SessionManager extends EventEmitter {
       case 'user_input':
         return { textLength: event.text.length, attachmentTurnIndex: event.attachmentTurnIndex ?? null };
       case 'thinking':
+      case 'text':
         return { textLength: event.text.length };
     }
   }

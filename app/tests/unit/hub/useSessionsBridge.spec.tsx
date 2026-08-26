@@ -12,6 +12,7 @@ import type { AgentSession, HlEvent } from '../../../src/renderer/hub/types';
 type BridgeHandlers = {
   sessionOutput?: (id: string, event: HlEvent) => void;
   sessionUpdated?: (session: AgentSession) => void;
+  sessionDeleted?: (id: string) => void;
   sessionBrowserGone?: (id: string) => void;
   sessionBrowserAttached?: (id: string) => void;
 };
@@ -67,6 +68,10 @@ function installApi(listAll: Promise<AgentSession[]>): BridgeHandlers {
         }),
         sessionUpdated: vi.fn((cb: BridgeHandlers['sessionUpdated']) => {
           handlers.sessionUpdated = cb;
+          return vi.fn();
+        }),
+        sessionDeleted: vi.fn((cb: BridgeHandlers['sessionDeleted']) => {
+          handlers.sessionDeleted = cb;
           return vi.fn();
         }),
         sessionBrowserGone: vi.fn((cb: BridgeHandlers['sessionBrowserGone']) => {
@@ -153,6 +158,19 @@ describe('useSessionsBridge', () => {
       { type: 'thinking', text: 'first live token' },
     ]);
 
+    act(() => root.unmount());
+  });
+
+  it('removes a deleted session from the live store', async () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    const handlers = installApi(Promise.resolve([session({ id })]));
+    const { root } = renderBridge();
+    await act(async () => { await Promise.resolve(); });
+
+    act(() => handlers.sessionDeleted?.(id));
+
+    expect(useSessionsStore.getState().byId[id]).toBeUndefined();
+    expect(useSessionsStore.getState().order).not.toContain(id);
     act(() => root.unmount());
   });
 });

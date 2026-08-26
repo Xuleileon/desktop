@@ -158,4 +158,23 @@ describe('ChatTurn', () => {
 
     act(() => root.unmount());
   });
+
+  it('keeps trailing Pi thinking in the subdued reasoning style while streaming', () => {
+    const turn: Turn = {
+      id: 'turn-1',
+      userEntry: null,
+      agentEntries: [{
+        id: 'thinking-1',
+        type: 'thinking',
+        timestamp: 1000,
+        content: 'Checking the login state.',
+      }],
+    };
+    const { container, root } = renderTurn(turn, { engine: 'pi', inflightSince: 1000 });
+
+    expect(container.querySelector('.chat-step__thinking')?.textContent).toContain('Checking the login state.');
+    expect(container.querySelector('.chat-step__assistant')).toBeNull();
+
+    act(() => root.unmount());
+  });
 });

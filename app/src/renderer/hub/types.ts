@@ -2,6 +2,7 @@ export type SessionStatus = 'draft' | 'running' | 'stuck' | 'paused' | 'stopped'
 
 export type HlEvent =
   | { type: 'thinking';    text: string }
+  | { type: 'text';        text: string }
   | { type: 'tool_call';   name: string; args: unknown; iteration: number }
   | { type: 'tool_result'; name: string; ok: boolean; preview: string; ms: number }
   | { type: 'done';        summary: string; iterations: number }
@@ -85,6 +86,8 @@ export function hlEventToOutputEntry(event: HlEvent, timestamp: number, stableId
   switch (event.type) {
     case 'thinking':
       return { id, type: 'thinking', timestamp, content: event.text };
+    case 'text':
+      return { id, type: 'text', timestamp, content: event.text };
     case 'tool_call':
       return {
         id, type: 'tool_call', timestamp,
@@ -188,7 +191,7 @@ export function adaptSession(session: AgentSession): {
   const merged: OutputEntry[] = [];
   for (const entry of raw) {
     const prev = merged[merged.length - 1];
-    if (entry.type === 'thinking' && prev?.type === 'thinking') {
+    if ((entry.type === 'thinking' || entry.type === 'text') && prev?.type === entry.type) {
       prev.content += entry.content;
       continue;
     }

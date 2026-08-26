@@ -20,6 +20,15 @@ const PREVIEW_PARK_VISIBLE_PX = 1;
 // desktop-class viewport. No enableDeviceEmulation — one knob only, no
 // ambiguity about where Chromium positions the rendered page.
 const EMULATED_VIEWPORT_HEIGHT = 900;
+const SAFE_TOP_LEVEL_PROTOCOLS = new Set(['about:', 'blob:', 'data:', 'file:', 'http:', 'https:']);
+
+export function isSafeTopLevelUrl(rawUrl: string): boolean {
+  try {
+    return SAFE_TOP_LEVEL_PROTOCOLS.has(new URL(rawUrl).protocol);
+  } catch {
+    return false;
+  }
+}
 
 type RuntimeBrowserIdentity = Pick<BrowserIdentity, 'userAgent'>;
 type ViewBounds = { x: number; y: number; width: number; height: number };
@@ -258,6 +267,19 @@ export class BrowserPool {
     // Fire onGone if the renderer process crashes, closes, or otherwise dies
     // out-of-band so the UI can react (stop showing "Browser starting…").
     const wc = view.webContents;
+    // Never hand arbitrary site-triggered custom schemes to Windows. Without
+    // this guard, pages that probe for desktop clients (for example
+    // `bitbrowser:`) produce a system "Get an app to open this link" dialog.
+    wc.on('will-navigate', (event, url) => {
+      if (isSafeTopLevelUrl(url)) return;
+      event.preventDefault();
+      browserLogger.warn('BrowserPool.navigation.blockedProtocol', { sessionId, url: url.slice(0, 200) });
+    });
+    wc.setWindowOpenHandler(({ url }) => {
+      if (isSafeTopLevelUrl(url)) return { action: 'allow' };
+      browserLogger.warn('BrowserPool.windowOpen.blockedProtocol', { sessionId, url: url.slice(0, 200) });
+      return { action: 'deny' };
+    });
     let navigationSeq = 0;
     let currentNavigation: { id: number; url: string; startedAt: number } | null = null;
 

@@ -430,6 +430,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('session-updated', handler);
       return () => ipcRenderer.removeListener('session-updated', handler);
     },
+    sessionDeleted: (cb: (id: string) => void): (() => void) => {
+      const handler = (_event: unknown, id: string) => {
+        if (typeof id === 'string') cb(id);
+      };
+      ipcRenderer.on('session-deleted', handler);
+      return () => ipcRenderer.removeListener('session-deleted', handler);
+    },
     sessionBrowserGone: (cb: (id: string) => void): (() => void) => {
       const handler = (_event: unknown, id: string) => {
         if (typeof id === 'string') cb(id);

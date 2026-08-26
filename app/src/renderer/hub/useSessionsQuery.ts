@@ -41,9 +41,13 @@ export function useSessionsQuery() {
         return [...prev, session];
       });
     });
+    const unsubDelete = api.on.sessionDeleted((id) => {
+      qc.setQueryData<AgentSession[]>(SESSIONS_KEY, (prev = []) => prev.filter((session) => session.id !== id));
+    });
 
     return () => {
       unsubUpdate();
+      unsubDelete();
     };
   }, [qc]);
 

@@ -73,6 +73,22 @@ describe('Pi adapter', () => {
     });
   });
 
+  it('keeps Pi reasoning separate from streamed answer text', () => {
+    const value = adapter();
+    const ctx = parseContext();
+    const thinking = value.parseLine(JSON.stringify({
+      type: 'message_update',
+      assistantMessageEvent: { type: 'thinking_delta', delta: 'checking cookies' },
+    }), ctx);
+    const text = value.parseLine(JSON.stringify({
+      type: 'message_update',
+      assistantMessageEvent: { type: 'text_delta', delta: 'Final answer' },
+    }), ctx);
+
+    expect(thinking.events).toEqual([{ type: 'thinking', text: 'checking cookies' }]);
+    expect(text.events).toEqual([{ type: 'text', text: 'Final answer' }]);
+  });
+
   it('surfaces terminal errors carried only by agent_end', () => {
     const value = adapter();
     const ctx = parseContext();

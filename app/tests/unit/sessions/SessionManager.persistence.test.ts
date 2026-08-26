@@ -181,6 +181,21 @@ afterEach(() => {
 });
 
 describe('SessionManager persistence', () => {
+  it('emits a deletion event after removing the persisted session', () => {
+    const dbPath = tempDbPath();
+    const manager = new SessionManager(dbPath);
+    const id = manager.createSession('Disposable session');
+    const deleted = vi.fn();
+    manager.onEvent('session-deleted', deleted);
+
+    manager.deleteSession(id);
+
+    expect(manager.getSession(id)).toBeUndefined();
+    expect(deleted).toHaveBeenCalledWith(id);
+    expect(mockState.stores.get(dbPath)?.rows.has(id)).toBe(false);
+    manager.destroy();
+  });
+
   it('hydrates provider resume ids and the last restorable URL after restart', () => {
     const dbPath = tempDbPath();
     const first = new SessionManager(dbPath);

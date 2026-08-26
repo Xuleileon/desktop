@@ -274,6 +274,7 @@ function createMockWebContents() {
     for (const handler of handlers) handler(...args);
     return handlers.length > 0;
   };
+  let windowOpenHandler: ((details: { url: string }) => { action: 'allow' | 'deny' }) | null = null;
   return {
     id,
     getURL: (): string => 'about:blank',
@@ -296,6 +297,10 @@ function createMockWebContents() {
     off,
     once,
     emit,
+    setWindowOpenHandler: (handler: (details: { url: string }) => { action: 'allow' | 'deny' }): void => {
+      windowOpenHandler = handler;
+    },
+    invokeWindowOpenHandler: (url: string): { action: 'allow' | 'deny' } | null => windowOpenHandler?.({ url }) ?? null,
     debugger: {
       attach: (): void => undefined,
       sendCommand: (): Promise<unknown> => Promise.resolve({}),

@@ -80,6 +80,7 @@ const piAdapter: EngineAdapter = {
       ...askBlockGuidanceLines(),
       "Use the `browser-harness-js` CLI for browser actions. Start with `browser-harness-js 'await connectToAssignedTarget()'`.",
       'Do not edit harness files unless the user asks or a confirmed Browser Harness JS defect blocks the task.',
+      'The `read` tool only reads files that already exist. To create an output file, use `bash` and write it under the absolute directory in BU_OUTPUTS_DIR; do not call `read` as a write operation.',
     ];
     const skillIndex = buildSkillIndexPrompt(ctx.harnessDir);
     if (skillIndex) lines.push('', skillIndex);
@@ -170,7 +171,9 @@ const piAdapter: EngineAdapter = {
         ? event.assistantMessageEvent as Record<string, unknown>
         : {};
       const delta = update.delta ?? update.textDelta ?? update.text;
-      if ((update.type === 'text_delta' || update.type === 'thinking_delta') && typeof delta === 'string' && delta) {
+      if (update.type === 'text_delta' && typeof delta === 'string' && delta) {
+        events.push({ type: 'text', text: delta });
+      } else if (update.type === 'thinking_delta' && typeof delta === 'string' && delta) {
         events.push({ type: 'thinking', text: delta });
       }
       return { events };

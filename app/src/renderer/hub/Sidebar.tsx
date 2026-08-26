@@ -9,7 +9,7 @@ interface SidebarSession extends AgentSession {
   lastActivityAt?: number;
 }
 
-export type SidebarRowAction = 'rerun' | 'stop' | 'pause' | 'resume';
+export type SidebarRowAction = 'rerun' | 'stop' | 'pause' | 'resume' | 'delete';
 
 export type SidebarMode = 'side' | 'top';
 
@@ -203,6 +203,7 @@ function SessionRow({
           ...(isPaused ? [{ id: 'resume', label: tr('Resume', '继续') }] : []),
           ...(isRunning ? [{ id: 'pause', label: tr('Pause', '暂停') }] : []),
           ...((isRunning || isPaused) ? [{ id: 'stop', label: tr('Stop', '停止'), tone: 'danger' as const }] : []),
+          { id: 'delete', label: tr('Delete', '删除'), tone: 'danger' as const, separatorBefore: true },
         ],
       },
       {
