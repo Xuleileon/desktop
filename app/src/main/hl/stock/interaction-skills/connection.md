@@ -1,5 +1,9 @@
 # Connection & Tab Visibility
 
+> Browser Use Desktop isolation: `connectToAssignedTarget()` is mandatory.
+> `listPageTargets()` and `Target.getTargets()` return only `BU_TARGET_ID`,
+> and switching to another conversation's target is rejected by the SDK.
+
 ## Just call `session.connect()`
 
 No args required. It scans OS-specific profile dirs for every running Chromium-based browser (Chrome, Chromium, Edge, Brave, Arc, Vivaldi, Opera, Comet, Canary), picks the most-recently-launched one whose WebSocket accepts, and attaches. Dead ports and permission-denied (403) candidates fall through in <100ms each, so the loop is fast.

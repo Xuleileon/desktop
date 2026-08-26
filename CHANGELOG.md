@@ -4,6 +4,37 @@ All notable changes to the Agentic Browser project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.0.34] - 2026-08-27
+
+This release contains every change since `v0.0.33`.
+
+### Added
+
+- **Durable per-task model selection** (`12e725a`) — added an in-composer model picker and persisted the selected provider-qualified model across task execution and Pi transcript updates.
+- **Browser conversation isolation regression coverage** — added tests for inherited REPL environment contamination, per-conversation target visibility, cross-target rejection, and assigned-session CDP routing.
+
+### Changed
+
+- **More durable desktop task runtime** (`12e725a`) — made harness materialization recover around locked Windows launchers, improved task-process cleanup, refined file and tool event rendering, and kept model state synchronized through the task lifecycle.
+- **Resumable chat behavior** (`854a18b`) — restored continuation of completed conversations and repaired transcript hydration when reopening an existing task.
+- **Browser Harness guidance is conversation-scoped** — updated the bundled skill and interaction references so agents operate only on their assigned browser view instead of enumerating or switching to other task targets.
+
+### Fixed
+
+- **Cross-conversation browser control** — always derive `CDP_REPL_PORT` and the REPL log from the current task and target, preventing a desktop process launched from an old agent shell from reusing another conversation's persistent REPL.
+- **REPL ownership enforcement** — expose the owning task and target in health responses, and reject start, status, stop, or restart operations when a live port belongs to another conversation.
+- **Browser target access control** — force Browser Harness connections through the assigned local CDP endpoint, hide unrelated targets, reject cross-target attachment/switching, and block target-creation and browser-global mutations from a conversation-scoped session.
+- **Windows file reveal and task resume** (`854a18b`) — retained the awaited Windows reveal path while preventing a completed-state check from disabling valid follow-up messages.
+
+### Verification
+
+- Browser isolation and harness regression suite: 19 passed, 1 skipped.
+- TypeScript typecheck passed.
+- Shell launcher syntax validation and live two-owner REPL rejection passed.
+- Full unit suite: 695 passed, 5 skipped; 7 pre-existing Windows portability failures remain in four unrelated test files.
+
+**Full source range:** `v0.0.33..v0.0.34`
+
 ## [0.0.33] - 2026-08-27
 
 This release contains every change since the `0.0.32` version baseline (`43a2d99`).

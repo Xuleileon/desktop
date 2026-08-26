@@ -32,10 +32,14 @@ describe('browser harness environment', () => {
     expect(rerunEnv.CDP_REPL_PORT).not.toBe(firstEnv.CDP_REPL_PORT);
   });
 
-  it('preserves an explicit REPL port override', () => {
-    const env = applyBrowserHarnessEnv(spawnContext('target-a'), { CDP_REPL_PORT: '9876' });
+  it('replaces inherited REPL ownership values from the desktop launch environment', () => {
+    const env = applyBrowserHarnessEnv(spawnContext('target-a'), {
+      CDP_REPL_PORT: '19876',
+      CDP_REPL_LOG: '/tmp/previous-session.log',
+    });
 
-    expect(env.CDP_REPL_PORT).toBe('9876');
+    expect(env.CDP_REPL_PORT).toBe(browserHarnessReplPort('session-123', 'target-a'));
+    expect(env.CDP_REPL_LOG).toBe(path.join('/tmp/harness', 'browser-harness-js-session-123.log'));
   });
 
   it('puts provider-neutral agent-skill and Browser Harness JS CLIs on PATH', () => {

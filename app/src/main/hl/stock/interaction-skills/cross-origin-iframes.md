@@ -1,5 +1,10 @@
 # Cross-Origin Iframes (OOPIFs)
 
+> Browser Use Desktop isolation: raw target switching is restricted to the
+> conversation's assigned page. If an OOPIF target is not returned, do not
+> enumerate or attach other targets; use frame-aware DOM methods on the
+> assigned page or report that the isolated runtime cannot reach the frame.
+
 Cross-origin iframes (stripe.com checkout, recaptcha, Salesforce Lightning, Azure blades) run in **out-of-process iframes (OOPIFs)** with their own CDP target. You cannot reach them via `contentDocument` from the parent.
 
 ## First try: coordinate clicks

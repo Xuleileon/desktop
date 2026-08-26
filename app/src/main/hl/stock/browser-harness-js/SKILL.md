@@ -50,9 +50,7 @@ Detect failure with `if browser-harness-js '...'; then ...; else handle_error; f
 
 ```bash
 browser-harness-js <<'EOF'
-const tabs = await listPageTargets();
-globalThis.tid = tabs[0].targetId;
-await session.use(globalThis.tid);
+const tabs = await listPageTargets(); // the assigned target only in Browser Use Desktop
 return globalThis.tid;
 EOF
 ```
@@ -76,7 +74,7 @@ Env vars: `CDP_REPL_PORT` (default `9876`), `CDP_REPL_LOG` (default `/tmp/browse
 These globals are pre-loaded — no imports needed:
 
 - `session` — the persistent `Session`. Has every CDP domain mounted: `session.Page`, `session.DOM`, `session.Runtime`, `session.Network`, … 56 domains, 652 methods total.
-- `listPageTargets()` — list real page targets via CDP's `Target.getTargets` (works on Chrome 144+ too), with `chrome://` and `devtools://` URLs filtered out. No args — uses the connected session.
+- `listPageTargets()` — in Browser Use Desktop, returns only the target assigned to the current conversation. No args — uses the connected session.
 - `detectBrowsers()` — scan OS-specific profile dirs for running Chromium-based browsers with remote debugging on. Returns `[{name, profileDir, port, wsPath, wsUrl, mtimeMs}]`, sorted by most recently launched.
 - `resolveWsUrl(opts)` — resolve a WS URL from `{wsUrl}` | `{port, host?}` | `{profileDir}`. For the no-args auto-detect flow, call `session.connect()` directly instead.
 - `CDP` — the generated namespaces (`CDP.Page`, `CDP.Runtime`, …) for type-name reference.
@@ -141,25 +139,17 @@ await session.connect({ profileDir: '/Users/<you>/Library/Application Support/Go
 
 **If you see `No detected browser accepted a connection`** — the browsers have `DevToolsActivePort` files but none are currently serving WS. Most common cause: remote-debugging is enabled but the user hasn't clicked **Allow** on the prompt yet. Tell them to click Allow, then retry (or bump `timeoutMs`).
 
-### Picking a target (tab)
+### Assigned target isolation
 
-After `connect()`, call `session.use(targetId)` once; subsequent page-level calls (Page/DOM/Runtime/Network/etc.) auto-route to that target's sessionId. `Browser.*` and `Target.*` calls always hit the browser endpoint.
+`connectToAssignedTarget()` attaches the target assigned by Browser Use Desktop. Subsequent page-level calls (Page/DOM/Runtime/Network/etc.) auto-route to it. Other conversations' targets are not available.
 
 ```js
-const tabs = await listPageTargets()                     // no args; uses the connected session
-const sid  = await session.use(tabs[0].targetId)
+const tabs = await listPageTargets()                     // contains only BU_TARGET_ID
 await session.Page.enable()
 await session.Page.navigate({ url: 'https://example.com' })
 ```
 
-`listPageTargets()` uses CDP's `Target.getTargets` (not `/json`), so it works on Chrome 144+ too. It already filters out `chrome://` and `devtools://` URLs. Equivalent raw call:
-
-```js
-const { targetInfos } = await session.Target.getTargets({})
-const tabs = targetInfos.filter(t => t.type === 'page' && !t.url.startsWith('chrome://') && !t.url.startsWith('devtools://'))
-```
-
-To switch tabs: `session.use(otherTargetId)`. To detach: `session.setActiveSession(undefined)`.
+Do not call `session.use()` with another target or reconnect to another CDP endpoint. The SDK rejects both operations so one conversation cannot inspect or mutate another conversation's page.
 
 ### Events
 
@@ -181,8 +171,7 @@ const ev = await session.waitFor(
 Each snippet runs inside its own async wrapper, so its `let`/`const` declarations vanish when it returns. To carry data forward, attach to `globalThis`:
 
 ```bash
-browser-harness-js '(await listPageTargets()).forEach((t,i)=>globalThis["tab"+i]=t.targetId)'
-browser-harness-js 'await session.use(globalThis.tab0)'
+browser-harness-js 'globalThis.assignedTarget = (await listPageTargets())[0]?.targetId'
 browser-harness-js 'await session.Page.navigate({url:"https://example.com"})'
 ```
 
@@ -211,7 +200,7 @@ When attaching to the user's already-running browser:
 
 ## Working with targets (tabs)
 
-- **Filter Chrome internals.** `listPageTargets()` already drops `chrome://` and `devtools://` URLs. If you call `Target.getTargets()` directly, filter manually.
+- **Conversation isolation.** `listPageTargets()` and raw `Target.getTargets()` expose only `BU_TARGET_ID` inside Browser Use Desktop.
 - **CDP target order ≠ visible tab-strip order.** When the user says "the first tab I can see", use a screenshot or page title to identify it — `Target.activateTarget` only switches to a known targetId.
 
 ## Looking up a method

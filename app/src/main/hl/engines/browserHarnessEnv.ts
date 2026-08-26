@@ -22,8 +22,12 @@ export function applyBrowserHarnessEnv(ctx: SpawnContext, env: NodeJS.ProcessEnv
   for (const key of Object.keys(env)) {
     if (key !== pathKey && key.toLowerCase() === 'path') delete env[key];
   }
-  env.CDP_REPL_PORT = env.CDP_REPL_PORT ?? browserHarnessReplPort(ctx.sessionId, ctx.targetId);
-  env.CDP_REPL_LOG = env.CDP_REPL_LOG ?? path.join(ctx.harnessDir, `browser-harness-js-${ctx.sessionId}.log`);
+  // These values are resource-ownership boundaries, not user overrides.
+  // A desktop process launched from an agent shell may itself inherit an old
+  // CDP_REPL_PORT/CDP_REPL_LOG. Preserving those values makes every later
+  // conversation post code into the first conversation's persistent REPL.
+  env.CDP_REPL_PORT = browserHarnessReplPort(ctx.sessionId, ctx.targetId);
+  env.CDP_REPL_LOG = path.join(ctx.harnessDir, `browser-harness-js-${ctx.sessionId}.log`);
   env.BU_SESSION_ID = ctx.sessionId;
   // Watched session outputs dir — any file written here triggers a `file_output`
   // event in runEngine. The Page.captureScreenshot wrapper in repl.ts auto-saves

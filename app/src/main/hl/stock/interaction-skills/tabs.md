@@ -1,5 +1,9 @@
 # Tabs
 
+> Browser Use Desktop isolation: a conversation owns one page target. Targets
+> belonging to other conversations are hidden, and `session.use()` rejects
+> them. Prefer same-page navigation instead of switching Browser Use targets.
+
 Use **CDP for control** (attach, activate known targets, inspect). Use **UI automation for visible order**.
 
 ## Pure CDP

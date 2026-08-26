@@ -86,8 +86,8 @@ The `browser-harness-js` REPL preloads:
 - `session` - persistent CDP `Session`.
 - `connectToAssignedTarget()` - Browser Use Desktop helper for `BU_TARGET_ID`
   and `BU_CDP_PORT`.
-- `listPageTargets()` - lists real page targets when connected to a browser
-  endpoint.
+- `listPageTargets()` - returns only this conversation's assigned page target.
+  Other Browser Use conversations are intentionally hidden.
 - `detectBrowsers()` and `resolveWsUrl(opts)` - upstream browser discovery.
 - `CDP` - generated namespace/type reference.
 

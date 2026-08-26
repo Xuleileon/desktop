@@ -17,6 +17,8 @@ import { Session, listPageTargets, resolveWsUrl, detectBrowsers } from './sessio
 import * as Generated from './generated.ts';
 
 const session = new Session();
+const resourceSessionId = process.env.BU_SESSION_ID ?? 'unknown';
+const assignedTargetId = process.env.BU_TARGET_ID ?? '';
 (globalThis as any).session = session;
 // Bind helpers to the singleton session so the agent calls `listPageTargets()`
 // with no args (no host/port confusion, no /json endpoint assumption).
@@ -109,6 +111,8 @@ const server = Bun.serve({
         uptime: Math.floor((Date.now() - startedAt) / 1000),
         connected: session.isConnected(),
         sessionId: session.getActiveSession() ?? null,
+        resourceSessionId,
+        targetId: assignedTargetId,
       });
     }
 

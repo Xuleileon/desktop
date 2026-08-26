@@ -53,6 +53,8 @@ export class Session implements Transport {
   private pending = new Map<number, Pending>();
   private activeSessionId: string | undefined;
   private eventListeners: Array<(method: string, params: unknown, sessionId?: string) => void> = [];
+  private readonly assignedTargetId = process.env.BU_TARGET_ID?.trim() || undefined;
+  private readonly assignedPort = process.env.BU_CDP_PORT?.trim() || undefined;
 
   // Generated bindings — one per CDP domain.
   // Initialized lazily after construction so `_call` is available.
@@ -81,6 +83,23 @@ export class Session implements Transport {
    * Page/DOM/Runtime calls route to the app-assigned browser view.
    */
   async connect(opts: ConnectOptions = {}): Promise<void> {
+    if (this.assignedTargetId && this.assignedPort) {
+      if (opts.wsUrl || opts.profileDir) {
+        throw new Error('Browser isolation: this conversation may only connect to its assigned Browser Use target.');
+      }
+      if (opts.targetId && opts.targetId !== this.assignedTargetId) {
+        throw new Error(`Browser isolation: target ${opts.targetId} is not assigned to this conversation.`);
+      }
+      if (opts.port != null && Number(opts.port) !== Number(this.assignedPort)) {
+        throw new Error(`Browser isolation: CDP port ${opts.port} is not assigned to this conversation.`);
+      }
+      opts = {
+        host: '127.0.0.1',
+        port: this.assignedPort,
+        targetId: this.assignedTargetId,
+        timeoutMs: opts.timeoutMs,
+      };
+    }
     const timeoutMs = opts.timeoutMs ?? 5_000;
     if (opts.wsUrl || opts.profileDir || opts.port) {
       const endpoint = await resolveEndpoint(opts);
@@ -158,6 +177,9 @@ export class Session implements Transport {
    * Uses Target.attachToTarget with flatten:true (single-WS, sessionId-on-message).
    */
   async use(targetId: string): Promise<string> {
+    if (this.assignedTargetId && targetId !== this.assignedTargetId) {
+      throw new Error(`Browser isolation: target ${targetId} belongs to another browser view.`);
+    }
     const r = await this._call('Target.attachToTarget', { targetId, flatten: true }) as { sessionId: string };
     this.activeSessionId = r.sessionId;
     return r.sessionId;
@@ -165,6 +187,9 @@ export class Session implements Transport {
 
   /** Set the active sessionId directly (e.g. one you already attached). */
   setActiveSession(sessionId: string | undefined): void {
+    if (this.assignedTargetId && sessionId !== this.activeSessionId) {
+      throw new Error('Browser isolation: the assigned target session cannot be replaced or detached.');
+    }
     this.activeSessionId = sessionId;
   }
 
@@ -202,15 +227,50 @@ export class Session implements Transport {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error('Not connected. Call session.connect(...) first.'));
     }
+    const isolationError = this.browserIsolationError(method, params);
+    if (isolationError) return Promise.reject(new Error(isolationError));
     const id = this.nextId++;
     const msg: Record<string, unknown> = { id, method, params: params ?? {} };
     if (this.activeSessionId && !isBrowserLevel(method)) {
       msg.sessionId = this.activeSessionId;
     }
-    return new Promise((resolve, reject) => {
+    const response = new Promise<unknown>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       this.ws!.send(JSON.stringify(msg));
     });
+    if (this.assignedTargetId && method === 'Target.getTargets') {
+      return response.then((result) => {
+        const record = result && typeof result === 'object' ? result as Record<string, unknown> : {};
+        const targetInfos = Array.isArray(record.targetInfos) ? record.targetInfos : [];
+        return {
+          ...record,
+          targetInfos: targetInfos.filter((info) => (
+            info && typeof info === 'object'
+            && (info as Record<string, unknown>).targetId === this.assignedTargetId
+          )),
+        };
+      });
+    }
+    return response;
+  }
+
+  private browserIsolationError(method: string, params: unknown): string | null {
+    const assignedTargetId = this.assignedTargetId;
+    if (!assignedTargetId) return null;
+    const record = params && typeof params === 'object' ? params as Record<string, unknown> : {};
+    if (method === 'Target.getTargets') return null;
+    if (method === 'Target.attachToTarget' || method === 'Target.activateTarget' || method === 'Target.getTargetInfo') {
+      const requestedTarget = record.targetId;
+      if (requestedTarget === assignedTargetId) return null;
+      return `Browser isolation: ${method} may only address the assigned target.`;
+    }
+    if (method.startsWith('Target.')) {
+      return `Browser isolation: ${method} is not available inside a conversation-scoped browser view.`;
+    }
+    if (method.startsWith('Browser.') && method !== 'Browser.getVersion') {
+      return `Browser isolation: ${method} is browser-global and is not available inside a conversation.`;
+    }
+    return null;
   }
 
   private onMessage(raw: string): void {
