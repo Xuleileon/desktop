@@ -368,7 +368,7 @@ describe('runEngine harness watcher', () => {
     expect(events.some((event) => event.type === 'done')).toBe(true);
   });
 
-  test('passes BrowserCode provider/model config through the generic spawn context', async () => {
+  test('passes BrowserCode provider config and prefers the task model override', async () => {
     authMocks.loadBrowserCodeConfig.mockResolvedValue({
       providerId: 'alibaba',
       model: 'alibaba/qwen3-coder-plus',
@@ -399,6 +399,7 @@ describe('runEngine harness watcher', () => {
 
     await runEngine({
       engineId: 'browsercode',
+      model: 'alibaba/qwen3.6-plus',
       prompt: 'test',
       sessionId: 'test-session',
       webContents: createWebContents() as unknown as WebContents,
@@ -410,9 +411,9 @@ describe('runEngine harness watcher', () => {
 
     expect(seenContexts[0]).toMatchObject({
       providerId: 'alibaba',
-      model: 'alibaba/qwen3-coder-plus',
+      model: 'alibaba/qwen3.6-plus',
       savedApiKey: 'test-browsercode-key',
     });
-    expect(resolvedModels).toEqual([{ model: 'alibaba/qwen3-coder-plus', source: 'config' }]);
+    expect(resolvedModels).toEqual([{ model: 'alibaba/qwen3.6-plus', source: 'config' }]);
   });
 });

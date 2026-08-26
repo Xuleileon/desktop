@@ -497,8 +497,10 @@ app.whenReady().then(async () => {
     }
   });
 
-  async function stampConfiguredSessionModel(id: string, engineId: string, source: string): Promise<void> {
-    if (engineId !== 'browsercode') return;
+  async function stampConfiguredSessionModel(id: string, engineId: string, source: string): Promise<string | undefined> {
+    const existing = sessionManager.getSession(id)?.model?.trim();
+    if (existing) return existing;
+    if (engineId !== 'browsercode') return undefined;
     try {
       const cfg = await loadBrowserCodeConfig();
       const model = cfg?.model?.trim();
@@ -510,7 +512,7 @@ app.whenReady().then(async () => {
           providerId: cfg?.providerId ?? null,
           hasBrowserCodeConfig: Boolean(cfg),
         });
-        return;
+        return undefined;
       }
       sessionManager.setSessionModel(id, model);
       mainLogger.info('main.sessionModel.stamped', {
@@ -520,6 +522,7 @@ app.whenReady().then(async () => {
         providerId: cfg?.providerId ?? null,
         model,
       });
+      return model;
     } catch (err) {
       mainLogger.warn('main.sessionModel.stampFailed', {
         id,
@@ -527,6 +530,7 @@ app.whenReady().then(async () => {
         source,
         error: (err as Error).message,
       });
+      return undefined;
     }
   }
 
@@ -1061,7 +1065,7 @@ app.whenReady().then(async () => {
     }
 
     const engineId = sessionManager.getSessionEngine(validatedId) ?? DEFAULT_ENGINE_ID;
-    await stampConfiguredSessionModel(validatedId, engineId, source);
+    const configuredModel = await stampConfiguredSessionModel(validatedId, engineId, source);
     const abortController = sessionManager.resumeSession(validatedId, validatedPrompt, {
       attachmentTurnIndex,
       externalRequestId,
@@ -1078,6 +1082,7 @@ app.whenReady().then(async () => {
     const runId = beginEngineRun(validatedId);
     runEngine({
       engineId,
+      model: configuredModel,
       harnessDir: harnessDir(),
       sessionId: validatedId,
       prompt: validatedPrompt,
@@ -1153,7 +1158,7 @@ app.whenReady().then(async () => {
     try {
       const engineId = await assertSessionEngineReady(id);
       mainLogger.info('main.startSessionWithAgent.timing', { id, step: 'enginePreflight', ms: Date.now() - t0, engineId });
-      await stampConfiguredSessionModel(id, engineId, 'start');
+      const configuredModel = await stampConfiguredSessionModel(id, engineId, 'start');
 
       const abortController = sessionManager.startSession(id);
       mainLogger.info('main.startSessionWithAgent.timing', { id, step: 'startSession', ms: Date.now() - t0 });
@@ -1188,6 +1193,7 @@ app.whenReady().then(async () => {
       launched = true;
       runEngine({
         engineId,
+        model: configuredModel,
         harnessDir: harnessDir(),
         sessionId: id,
         prompt: sessionManager.getInitialPrompt(id) ?? sessionManager.getSession(id)!.prompt,
@@ -1310,27 +1316,32 @@ app.whenReady().then(async () => {
     let promptRaw: unknown;
     let attachmentsRaw: unknown;
     let engineRaw: unknown;
+    let modelRaw: unknown;
     if (typeof payload === 'string') {
       promptRaw = payload;
     } else if (payload && typeof payload === 'object') {
       promptRaw = (payload as { prompt?: unknown }).prompt;
       attachmentsRaw = (payload as { attachments?: unknown }).attachments;
       engineRaw = (payload as { engine?: unknown }).engine;
+      modelRaw = (payload as { model?: unknown }).model;
     } else {
-      throw new Error('sessions:create payload must be a string or { prompt, attachments?, engine? }');
+      throw new Error('sessions:create payload must be a string or { prompt, attachments?, engine?, model? }');
     }
     const validatedPrompt = assertString(promptRaw, 'prompt', 10000);
     const attachments = assertAttachments(attachmentsRaw);
     const engineId = engineRaw == null ? DEFAULT_ENGINE_ID : assertString(engineRaw, 'engine', 50);
+    const model = modelRaw == null ? undefined : assertString(modelRaw, 'model', 200).trim() || undefined;
     mainLogger.info('main.sessions:create', {
       promptLength: validatedPrompt.length,
       attachmentCount: attachments.length,
       engineId,
+      model: model ?? null,
       attachmentMeta: attachments.map((a) => ({ name: a.name, mime: a.mime, size: a.bytes.byteLength })),
     });
     const initialAttachmentTurnIndex = attachments.length > 0 ? 0 : undefined;
     const id = sessionManager.createSession(validatedPrompt, { attachmentTurnIndex: initialAttachmentTurnIndex });
     sessionManager.setSessionEngine(id, engineId);
+    if (model) sessionManager.setSessionModel(id, model);
     if (attachments.length > 0) {
       const turnIndex = initialAttachmentTurnIndex ?? sessionManager.getNextAttachmentTurnIndex(id);
       for (const a of attachments) {
@@ -1414,7 +1425,7 @@ app.whenReady().then(async () => {
     browserPool.destroy(validatedId, shellWindow ?? undefined);
 
     const engineId = sessionManager.getSessionEngine(validatedId) ?? DEFAULT_ENGINE_ID;
-    await stampConfiguredSessionModel(validatedId, engineId, 'rerun');
+    const configuredModel = await stampConfiguredSessionModel(validatedId, engineId, 'rerun');
     const abortController = sessionManager.rerunSession(validatedId, kickoffOverride);
     const kickoffPrompt = sessionManager.getInitialPrompt(validatedId) ?? session.prompt;
     captureEvent('session_rerun', {
@@ -1448,6 +1459,7 @@ app.whenReady().then(async () => {
     const runId = beginEngineRun(validatedId);
     runEngine({
       engineId,
+      model: configuredModel,
       harnessDir: harnessDir(),
       sessionId: validatedId,
       prompt: kickoffPrompt,

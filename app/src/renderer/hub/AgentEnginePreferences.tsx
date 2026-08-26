@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useI18n } from './i18n';
 
-interface EnginePreferenceView {
+export interface EnginePreferenceView {
   id: string;
   displayName: string;
   model: string;
@@ -14,8 +14,8 @@ interface EnginePreferenceView {
 let cachedPreferences: EnginePreferenceView[] | null = null;
 let pendingPreferences: Promise<EnginePreferenceView[]> | null = null;
 
-async function loadPreferences(): Promise<EnginePreferenceView[]> {
-  if (cachedPreferences) return cachedPreferences;
+export async function loadPreferences(): Promise<EnginePreferenceView[]> {
+  if (cachedPreferences && cachedPreferences.length > 0) return cachedPreferences;
   if (!pendingPreferences) {
     const api = window.electronAPI?.settings?.enginePreferences;
     pendingPreferences = api ? api.get() : Promise.resolve([]);

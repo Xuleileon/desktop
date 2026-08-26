@@ -34,7 +34,7 @@ declare module '*.webp' {
 
 interface ElectronSessionAPI {
   create: (
-    promptOrPayload: string | { prompt: string; attachments?: Array<{ name: string; mime: string; bytes: Uint8Array }>; engine?: string },
+    promptOrPayload: string | { prompt: string; attachments?: Array<{ name: string; mime: string; bytes: Uint8Array }>; engine?: string; model?: string },
   ) => Promise<string>;
   start: (id: string) => Promise<void>;
   cancel: (id: string) => Promise<void>;

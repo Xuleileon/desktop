@@ -151,8 +151,8 @@ function publicEntry(entry) {
 function tokenize(value) {
   return String(value || '')
     .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((part) => part.length > 1);
+    .match(/[\p{L}\p{N}]+/gu)
+    ?.filter((part) => part.length > 1) || [];
 }
 
 function matchEntry(entry, query) {
@@ -186,6 +186,14 @@ function matchEntry(entry, query) {
     tokenFields.body.length,
   ];
   if (!rank.some(Boolean)) return null;
+  // Description/body-only matches are intentionally weak: a generic word such as
+  // "inventory" must not make a Facebook or Zillow playbook look relevant
+  // to a Feishu task. Require every query token when metadata did not match.
+  const hasStrongMetadataMatch = phraseFields.length > 0
+    || tokenFields.id.length > 0
+    || tokenFields.title.length > 0;
+  const weakMatchedTokens = new Set([...tokenFields.description, ...tokenFields.body]);
+  if (!hasStrongMetadataMatch && weakMatchedTokens.size < tokens.length) return null;
   return { phrase: phraseFields, tokens: tokenFields, rank };
 }
 

@@ -52,6 +52,21 @@ describe('agent-skill CLI', () => {
     expect(typeof parsed.elapsed_ms).toBe('number');
   });
 
+  it('supports non-Latin search terms and rejects weak unrelated body-only matches', () => {
+    const unrelated = json(['search', 'Feishu accepting']);
+    expect(unrelated.parsed.count).toBe(0);
+
+    fs.mkdirSync(path.join(root, 'domain-skills', 'feishu'), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, 'domain-skills', 'feishu', 'inventory.md'),
+      '# 飞书库存查询\n\n用于在飞书多维表格中查询商品库存。\n',
+      'utf-8',
+    );
+
+    const chinese = json(['search', '飞书 库存']);
+    expect((chinese.parsed.entries as Array<Record<string, unknown>>)[0].id).toBe('domain/feishu/inventory');
+  });
+
   it('creates, views, validates, patches, and deletes user skills', () => {
     const body = [
       'Use when a recurring CRM triage workflow needs the same checks.',

@@ -12,6 +12,7 @@ import { INPUT_PLACEHOLDER } from './constants';
 import { EnginePicker, EngineLogo } from './EnginePicker';
 import { AttachmentList, type AttachmentItem } from './chat-v2/Attachments';
 import { useI18n } from './i18n';
+import { loadPreferences, type EnginePreferenceView } from './AgentEnginePreferences';
 
 const ENGINE_DISPLAY_NAMES: Record<string, string> = {
   'claude-code': 'Claude Code',
@@ -37,6 +38,7 @@ export interface TaskInputSubmission {
   prompt: string;
   attachments: TaskInputAttachment[];
   engine: string;
+  model?: string;
 }
 
 interface TaskInputProps {
@@ -54,6 +56,7 @@ interface TaskInputProps {
 }
 
 const ENGINE_STORAGE_KEY = 'hub.selectedEngine';
+const MODEL_STORAGE_KEY = 'hub.selectedModels.v1';
 const DEFAULT_ENGINE = 'claude-code';
 
 function loadStoredEngine(): string {
@@ -62,6 +65,19 @@ function loadStoredEngine(): string {
     return v && v.length > 0 ? v : DEFAULT_ENGINE;
   } catch {
     return DEFAULT_ENGINE;
+  }
+}
+
+function loadStoredModels(): Record<string, string> {
+  try {
+    const value = JSON.parse(localStorage.getItem(MODEL_STORAGE_KEY) ?? '{}') as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+    );
+  } catch {
+    return {};
   }
 }
 
@@ -100,6 +116,8 @@ export const TaskInput = forwardRef<TaskInputHandle, TaskInputProps>(function Ta
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [engine, setEngine] = useState<string>(() => loadStoredEngine());
+  const [modelSelections, setModelSelections] = useState<Record<string, string>>(() => loadStoredModels());
+  const [enginePreferences, setEnginePreferences] = useState<EnginePreferenceView[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -125,6 +143,16 @@ export const TaskInput = forwardRef<TaskInputHandle, TaskInputProps>(function Ta
     window.addEventListener('resize', resizeTextarea);
     return () => window.removeEventListener('resize', resizeTextarea);
   }, [resizeTextarea]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadPreferences()
+      .then((preferences) => {
+        if (!cancelled) setEnginePreferences(preferences);
+      })
+      .catch((err: unknown) => console.warn('[TaskInput] model preferences unavailable', err));
+    return () => { cancelled = true; };
+  }, []);
 
   const addFiles = useCallback(async (files: FileList | File[]) => {
     setErrorMsg(null);
@@ -192,17 +220,30 @@ export const TaskInput = forwardRef<TaskInputHandle, TaskInputProps>(function Ta
     const trimmed = value.trim();
     if (!trimmed && attachments.length === 0) return;
     console.log('[TaskInput] submit', { promptLength: trimmed.length, attachmentCount: attachments.length });
-    onSubmit({ prompt: trimmed, attachments, engine: lockedEngine ?? engine });
+    const submittedEngine = lockedEngine ?? engine;
+    const preference = enginePreferences.find((entry) => entry.id === submittedEngine);
+    const submittedModel = !lockedEngine
+      ? (modelSelections[submittedEngine] ?? preference?.model ?? '').trim() || undefined
+      : undefined;
+    onSubmit({ prompt: trimmed, attachments, engine: submittedEngine, model: submittedModel });
     setValue('');
     setAttachments([]);
     setErrorMsg(null);
     textareaRef.current?.focus();
-  }, [value, attachments, engine, lockedEngine, onSubmit]);
+  }, [value, attachments, engine, lockedEngine, modelSelections, enginePreferences, onSubmit]);
 
   const onEngineChange = useCallback((id: string) => {
     setEngine(id);
     try { localStorage.setItem(ENGINE_STORAGE_KEY, id); } catch { /* ignore */ }
   }, []);
+
+  const onModelChange = useCallback((model: string) => {
+    setModelSelections((current) => {
+      const next = { ...current, [engine]: model };
+      try { localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, [engine]);
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -236,6 +277,12 @@ export const TaskInput = forwardRef<TaskInputHandle, TaskInputProps>(function Ta
   const onDragLeave = useCallback(() => setDragActive(false), []);
 
   const canSubmit = value.trim().length > 0 || attachments.length > 0;
+  const currentEnginePreference = enginePreferences.find((entry) => entry.id === engine);
+  const currentModel = modelSelections[engine] ?? currentEnginePreference?.model ?? '';
+  const availableModels = currentEnginePreference?.models ?? [];
+  const showModelPicker = !lockedEngine && Boolean(currentEnginePreference)
+    && (availableModels.length > 0 || currentEnginePreference?.modelConfigurable);
+  const hasCustomCurrentModel = currentModel.length > 0 && !availableModels.some((model) => model.id === currentModel);
 
   useImperativeHandle(ref, () => ({
     addFiles: (files) => addFiles(files),
@@ -312,6 +359,25 @@ export const TaskInput = forwardRef<TaskInputHandle, TaskInputProps>(function Ta
             )
             : <EnginePicker value={engine} onChange={onEngineChange} />
           }
+          {showModelPicker && (
+            <label className="task-model-picker">
+              <span className="sr-only">{tr('Model', '模型')}</span>
+              <select
+                className="task-model-picker__select"
+                value={currentModel}
+                onChange={(event) => onModelChange(event.target.value)}
+                onClick={(event) => event.stopPropagation()}
+                aria-label={tr('Model', '模型')}
+                title={tr('Select model for this task', '选择本次任务使用的模型')}
+              >
+                <option value="">{tr('Default model', '默认模型')}</option>
+                {hasCustomCurrentModel && <option value={currentModel}>{currentModel}</option>}
+                {availableModels.map((model) => (
+                  <option key={model.id} value={model.id}>{model.label}</option>
+                ))}
+              </select>
+            </label>
+          )}
           <input
             ref={fileInputRef}
             type="file"

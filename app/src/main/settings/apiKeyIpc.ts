@@ -100,6 +100,10 @@ async function piModels(): Promise<Array<{ id: string; label: string }>> {
 
 async function handleEnginePreferencesGet(): Promise<EnginePreferenceStatus[]> {
   const dynamicPiModels = await piModels();
+  const browserCodeStore = await loadBrowserCodeStore();
+  const browserCodeProvider = browserCodeStore?.active
+    ? BROWSER_CODE_PROVIDERS.find((provider) => provider.id === browserCodeStore.active)
+    : undefined;
   return listAdapters()
     .map((adapter) => {
       const preference = loadEnginePreference(adapter.id);
@@ -113,12 +117,18 @@ async function handleEnginePreferencesGet(): Promise<EnginePreferenceStatus[]> {
           ? codexModels()
           : adapter.id === 'pi'
             ? dynamicPiModels
-            : [];
+            : adapter.id === 'browsercode'
+              ? browserCodeProvider?.models ?? []
+              : [];
+      const model = adapter.id === 'browsercode' && browserCodeProvider && browserCodeStore?.active
+        ? browserCodeStore.keys[browserCodeStore.active]?.lastModel ?? browserCodeProvider.defaultModel
+        : preference.model;
       const leanModeConfigurable = adapter.id !== 'pi';
       return {
         id: adapter.id,
         displayName: adapter.displayName,
         ...preference,
+        model,
         leanMode: leanModeConfigurable && preference.leanMode,
         models,
         modelConfigurable: adapter.id !== 'browsercode',

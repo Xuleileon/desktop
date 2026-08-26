@@ -131,6 +131,9 @@ export interface EngineRunControl {
 
 export interface RunEngineOptions {
   engineId: string;
+  /** Optional task/session-specific model. Takes precedence over the global
+   * engine preference while leaving that preference unchanged. */
+  model?: string;
   prompt: string;
   sessionId: string;
   webContents: WebContents;

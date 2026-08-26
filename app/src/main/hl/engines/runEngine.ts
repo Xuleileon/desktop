@@ -133,7 +133,7 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
   //    Anthropic key to OpenAI (or vice versa).
   let savedApiKey: string | undefined;
   let providerId: string | undefined;
-  let model: string | undefined;
+  let model = opts.model?.trim() || undefined;
   let cliAuthed = false;
   const preference = loadEnginePreference(adapter.id);
   const leanMode = adapter.id !== 'pi' && preference.leanMode;
@@ -146,7 +146,7 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
       const cfg = await loadBrowserCodeConfig();
       if (cfg?.apiKey) savedApiKey = cfg.apiKey;
       if (cfg?.providerId) providerId = cfg.providerId;
-      if (cfg?.model) model = cfg.model;
+      if (!model && cfg?.model) model = cfg.model;
       // BrowserCode is configured exclusively through provider API keys in
       // Settings. Do not classify a saved provider key as CLI-managed OAuth.
       cliAuthed = false;
@@ -163,7 +163,7 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
   } catch (err) {
     engineLogger.warn('engines.run.auth.resolveFailed', { error: (err as Error).message });
   }
-  if (adapter.id !== 'browsercode' && preference.model) model = preference.model;
+  if (!model && adapter.id !== 'browsercode' && preference.model) model = preference.model;
   // Headline auth-path log — greppable: `session.auth.path`. Tells you
   // which of the three cases this session falls into:
   //   - 'apiKey'       → using saved API key (ANTHROPIC / OPENAI env var)
