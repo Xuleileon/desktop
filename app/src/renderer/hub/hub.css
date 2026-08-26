@@ -3962,17 +3962,6 @@ button:focus:not(:focus-visible) {
   color: var(--color-status-success, #4ade80);
 }
 
-.agent-engine-preferences {
-  margin-bottom: var(--space-4);
-}
-
-.agent-engine-preferences__row {
-  display: grid;
-  grid-template-columns: minmax(150px, 0.6fr) minmax(280px, 1.8fr) minmax(170px, 0.8fr);
-  align-items: end;
-  gap: var(--space-4);
-}
-
 .engine-logo--pi,
 .pane__engine-icon--pi {
   display: inline-flex;
@@ -3983,50 +3972,88 @@ button:focus:not(:focus-visible) {
   line-height: 1;
 }
 
-.agent-engine-preferences__identity {
+.conn-card__icon--pi {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  min-height: 34px;
+  justify-content: center;
+  background-color: var(--color-bg-base);
+  border: 1px solid var(--color-border-default);
+  color: var(--color-fg-primary);
+  font-family: Georgia, serif;
+  font-size: var(--font-size-xl);
+  font-weight: 700;
 }
 
-.agent-engine-preferences__model {
+.engine-preference-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-5);
+  padding-top: var(--space-3);
+  border-top: 1px solid rgba(var(--highlight-rgb), 0.05);
+}
+
+.engine-preference-controls__model {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 260px;
+  max-width: 560px;
+}
+
+.engine-preference-controls__model .conn-card__api-key-input {
   width: 100%;
   min-width: 0;
 }
 
-.agent-engine-preferences__external-model {
+.engine-preference-controls__lean {
   display: flex;
   align-items: center;
-  min-height: 34px;
-  color: var(--color-fg-disabled);
-  font-size: var(--font-size-xs);
-}
-
-.agent-engine-preferences__lean {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   gap: var(--space-3);
+  margin-left: auto;
   min-height: 34px;
   color: var(--color-fg-primary);
 }
 
-.agent-engine-preferences__lean > span {
+.engine-preference-controls__lean > span {
   display: flex;
   flex-direction: column;
   gap: 2px;
   font-size: var(--font-size-xs);
 }
 
-.agent-engine-preferences__lean small {
+.engine-preference-controls__lean small {
   color: var(--color-fg-disabled);
 }
 
+.engine-preference-controls__error {
+  align-self: center;
+}
+
+.engine-preference-controls--sub {
+  align-items: center;
+  margin: var(--space-3) 0 0 42px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.engine-preference-controls--sub .conn-card__api-key-input {
+  width: min(390px, 100%);
+}
+
 @media (max-width: 900px) {
-  .agent-engine-preferences__row {
-    grid-template-columns: 1fr;
+  .engine-preference-controls {
+    flex-direction: column;
     align-items: stretch;
+  }
+
+  .engine-preference-controls__model {
+    max-width: none;
+  }
+
+  .engine-preference-controls__lean {
+    margin-left: 0;
+    justify-content: space-between;
   }
 }
 

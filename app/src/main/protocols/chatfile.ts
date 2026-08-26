@@ -61,7 +61,15 @@ export function registerChatfileHandler(): void {
     let absPath: string;
     try {
       const url = new URL(req.url);
-      absPath = decodeURIComponent(url.pathname);
+      // Renderer URLs carry the absolute path in a query parameter. Putting a
+      // Windows path directly after the authority (for example `filesC:\\...`)
+      // makes Chromium parse the drive letter as part of the host and reduces
+      // pathname to `/`.
+      const encodedPath = url.searchParams.get('path');
+      absPath = encodedPath ?? decodeURIComponent(url.pathname);
+      if (process.platform === 'win32' && /^\/[A-Za-z]:[\\/]/.test(absPath)) {
+        absPath = absPath.slice(1);
+      }
     } catch (err) {
       mainLogger.warn('chatfile.badUrl', { url: req.url, error: (err as Error).message });
       return new Response('bad url', { status: 400 });

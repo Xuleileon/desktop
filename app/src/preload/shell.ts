@@ -150,6 +150,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         leanMode: boolean;
         models: Array<{ id: string; label: string }>;
         modelConfigurable: boolean;
+        leanModeConfigurable: boolean;
       }>> => ipcRenderer.invoke('settings:engine-preferences:get'),
       save: (payload: { engineId: string; model: string; leanMode: boolean }): Promise<void> =>
         ipcRenderer.invoke('settings:engine-preferences:save', payload),

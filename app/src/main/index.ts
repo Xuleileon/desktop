@@ -1738,19 +1738,10 @@ app.whenReady().then(async () => {
       mainLogger.warn('main.sessions:reveal-output.missing', { path: resolvedPath });
       return { revealed: false, error: 'file no longer exists' };
     }
-    if (process.platform === 'win32') {
-      // Electron's showItemInFolder can ask Explorer to select a stale path
-      // while the harness tree is being refreshed, which surfaces a blocking
-      // "Location is not available" system dialog. Opening the verified parent
-      // directory is reliable on Windows and avoids blocking the agent UI.
-      const error = await shell.openPath(path.dirname(resolvedPath));
-      if (error) {
-        mainLogger.warn('main.sessions:reveal-output.failed', { path: resolvedPath, error });
-        return { revealed: false, error };
-      }
-    } else {
-      shell.showItemInFolder(resolvedPath);
-    }
+    // Select the verified file itself. Opening only its parent directory on
+    // Windows proved racy and could leave Explorer showing a stale output
+    // folder after the agent refreshed its session directory.
+    shell.showItemInFolder(resolvedPath);
     mainLogger.info('main.sessions:reveal-output', { path: resolvedPath, platform: process.platform });
     return { revealed: true };
   });

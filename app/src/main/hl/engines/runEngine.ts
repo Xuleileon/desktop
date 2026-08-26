@@ -136,6 +136,7 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
   let model: string | undefined;
   let cliAuthed = false;
   const preference = loadEnginePreference(adapter.id);
+  const leanMode = adapter.id !== 'pi' && preference.leanMode;
   try {
     if (adapter.id === 'codex') {
       const k = await loadOpenAIKey();
@@ -239,7 +240,7 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
     savedApiKey,
     providerId,
     model,
-    leanMode: preference.leanMode,
+    leanMode,
     attachmentRefs,
   };
   const wrappedPrompt = adapter.wrapPrompt(spawnCtx);
@@ -256,7 +257,7 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
     attachmentCount: attachmentRefs.length,
     providerId,
     model,
-    leanMode: preference.leanMode,
+    leanMode,
     authSource: savedApiKey ? 'savedApiKey' : 'cliManaged',
     args: args.map((a) => (a.length > 120 ? `${a.slice(0, 100)}…<${a.length}ch>` : a)),
     envAuthFlags: {

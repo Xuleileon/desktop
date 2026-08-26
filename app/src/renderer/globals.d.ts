@@ -310,6 +310,7 @@ interface ElectronSettingsEnginePreferencesAPI {
     leanMode: boolean;
     models: Array<{ id: string; label: string }>;
     modelConfigurable: boolean;
+    leanModeConfigurable: boolean;
   }>>;
   save: (payload: { engineId: string; model: string; leanMode: boolean }) => Promise<void>;
 }

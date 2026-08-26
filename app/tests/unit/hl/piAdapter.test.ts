@@ -22,7 +22,6 @@ function spawnContext(): SpawnContext {
     targetId: 'target-1',
     cdpPort: 9222,
     model: 'openai-codex/gpt-5.6-sol',
-    leanMode: true,
     attachmentRefs: [],
   };
 }
@@ -38,7 +37,7 @@ function parseContext(): ParseContext {
 }
 
 describe('Pi adapter', () => {
-  it('uses JSON print mode, stdin, custom model and lean extension isolation', () => {
+  it('uses JSON print mode, stdin and the custom model without disabling Pi extensions', () => {
     const value = adapter();
     const ctx = spawnContext();
     const prompt = value.wrapPrompt(ctx);
@@ -46,7 +45,6 @@ describe('Pi adapter', () => {
       '--print', '--mode', 'json', '--approve',
       '--session-id', ctx.sessionId,
       '--model', 'openai-codex/gpt-5.6-sol',
-      '--no-extensions',
     ]);
     expect(value.getStdinPayload?.(ctx, prompt)).toBe(prompt);
   });
@@ -73,5 +71,28 @@ describe('Pi adapter', () => {
       events: [{ type: 'done', summary: 'Finished', iterations: 1 }],
       terminalDone: true,
     });
+  });
+
+  it('surfaces terminal errors carried only by agent_end', () => {
+    const value = adapter();
+    const ctx = parseContext();
+    const result = value.parseLine(JSON.stringify({
+      type: 'agent_end',
+      messages: [{ role: 'assistant', stopReason: 'error', errorMessage: '400 invalid max_tokens' }],
+      willRetry: false,
+    }), ctx);
+    expect(result).toEqual({
+      events: [{ type: 'error', message: '400 invalid max_tokens' }],
+      terminalError: '400 invalid max_tokens',
+    });
+  });
+
+  it('surfaces exhausted auto retries', () => {
+    const value = adapter();
+    const result = value.parseLine(JSON.stringify({
+      type: 'auto_retry_end', success: false, finalError: 'provider unavailable',
+    }), parseContext());
+    expect(result.terminalError).toBe('provider unavailable');
+    expect(result.events).toEqual([{ type: 'error', message: 'provider unavailable' }]);
   });
 });

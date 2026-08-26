@@ -1,5 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { EngineLogo } from './EnginePicker';
+import React, { useEffect, useState } from 'react';
 import { useI18n } from './i18n';
 
 interface EnginePreferenceView {
@@ -9,112 +8,112 @@ interface EnginePreferenceView {
   leanMode: boolean;
   models: Array<{ id: string; label: string }>;
   modelConfigurable: boolean;
+  leanModeConfigurable: boolean;
 }
 
-export function AgentEnginePreferences(): React.ReactElement {
+let cachedPreferences: EnginePreferenceView[] | null = null;
+let pendingPreferences: Promise<EnginePreferenceView[]> | null = null;
+
+async function loadPreferences(): Promise<EnginePreferenceView[]> {
+  if (cachedPreferences) return cachedPreferences;
+  if (!pendingPreferences) {
+    const api = window.electronAPI?.settings?.enginePreferences;
+    pendingPreferences = api ? api.get() : Promise.resolve([]);
+  }
+  try {
+    cachedPreferences = await pendingPreferences;
+    return cachedPreferences;
+  } finally {
+    pendingPreferences = null;
+  }
+}
+
+function updateCache(next: EnginePreferenceView): void {
+  if (!cachedPreferences) return;
+  cachedPreferences = cachedPreferences.map((item) => item.id === next.id ? next : item);
+}
+
+export function EnginePreferenceControls({ engineId }: { engineId: string }): React.ReactElement | null {
   const { tr } = useI18n();
-  const [items, setItems] = useState<EnginePreferenceView[]>([]);
-  const [saving, setSaving] = useState<string | null>(null);
+  const [item, setItem] = useState<EnginePreferenceView | null>(null);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
+  useEffect(() => {
+    let cancelled = false;
+    loadPreferences()
+      .then((items) => {
+        if (!cancelled) setItem(items.find((entry) => entry.id === engineId) ?? null);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError((err as Error).message);
+      });
+    return () => { cancelled = true; };
+  }, [engineId]);
+
+  const persist = async (next: EnginePreferenceView): Promise<void> => {
     const api = window.electronAPI?.settings?.enginePreferences;
     if (!api) return;
+    setSaving(true);
     try {
-      setItems(await api.get());
-      setError(null);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }, []);
-
-  useEffect(() => { void refresh(); }, [refresh]);
-
-  const persist = useCallback(async (item: EnginePreferenceView) => {
-    const api = window.electronAPI?.settings?.enginePreferences;
-    if (!api) return;
-    setSaving(item.id);
-    try {
-      await api.save({ engineId: item.id, model: item.model.trim(), leanMode: item.leanMode });
+      await api.save({ engineId: next.id, model: next.model.trim(), leanMode: next.leanMode });
+      const saved = { ...next, model: next.model.trim() };
+      setItem(saved);
+      updateCache(saved);
       setError(null);
     } catch (err) {
       setError((err as Error).message);
     } finally {
-      setSaving(null);
+      setSaving(false);
     }
-  }, []);
-
-  const update = (id: string, patch: Partial<EnginePreferenceView>): void => {
-    setItems((current) => current.map((item) => {
-      if (item.id !== id) return item;
-      return { ...item, ...patch };
-    }));
   };
 
+  if (!item || (!item.modelConfigurable && !item.leanModeConfigurable)) return null;
+
   return (
-    <div className="conn-card agent-engine-preferences">
-      <div className="conn-card__header">
-        <div className="conn-card__icon conn-card__icon--letter">A</div>
-        <div className="conn-card__info">
-          <div className="conn-card__title-row">
-            <span className="conn-card__name">{tr('Agent frameworks', 'Agent 框架')}</span>
-          </div>
-          <span className="conn-card__subtitle">
-            {tr('Choose each CLI agent model. Lean mode skips external MCP startup.', '为每个 CLI Agent 选择模型；精简模式会跳过外部 MCP 启动。')}
+    <div className="engine-preference-controls">
+      {item.modelConfigurable && (
+        <label className="engine-preference-controls__model">
+          <span className="conn-card__field-label">{tr('Model', '模型')}</span>
+          <input
+            className="conn-card__api-key-input"
+            list={`engine-models-${item.id}`}
+            value={item.model}
+            placeholder={tr('Default model or custom model ID', '默认模型，或输入自定义模型 ID')}
+            onChange={(event) => setItem({ ...item, model: event.target.value })}
+            onBlur={() => { void persist(item); }}
+            onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+          />
+          <datalist id={`engine-models-${item.id}`}>
+            {item.models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+          </datalist>
+        </label>
+      )}
+      {item.leanModeConfigurable && (
+        <div className="engine-preference-controls__lean">
+          <span>
+            <strong>{tr('Lean mode', '精简模式')}</strong>
+            <small>{engineId === 'browsercode'
+              ? tr('Do not load external plugins', '不加载外部插件')
+              : tr('Do not load external MCP', '不加载外部 MCP')}</small>
           </span>
+          <button
+            type="button"
+            className="settings-pane__toggle"
+            data-on={item.leanMode}
+            disabled={saving}
+            aria-label={tr(`Toggle lean mode for ${item.displayName}`, `切换 ${item.displayName} 精简模式`)}
+            onClick={() => {
+              const next = { ...item, leanMode: !item.leanMode };
+              setItem(next);
+              void persist(next);
+            }}
+          >
+            <span className="settings-pane__toggle-thumb" />
+          </button>
         </div>
-      </div>
-      {items.map((item) => (
-        <div className="conn-card__sub agent-engine-preferences__row" key={item.id}>
-          <div className="agent-engine-preferences__identity">
-            <EngineLogo id={item.id} />
-            <span className="conn-card__name conn-card__name--sub">{item.displayName}</span>
-          </div>
-          <label className="conn-card__field conn-card__field--wide">
-            <span className="conn-card__field-label">{tr('Model', '模型')}</span>
-            {item.modelConfigurable ? (
-              <input
-                className="conn-card__api-key-input agent-engine-preferences__model"
-                list={`engine-models-${item.id}`}
-                value={item.model}
-                placeholder={tr('Default (leave empty) or custom model ID', '留空使用默认模型，或输入自定义模型 ID')}
-                onChange={(event) => update(item.id, { model: event.target.value })}
-                onBlur={() => { const current = items.find((entry) => entry.id === item.id); if (current) void persist(current); }}
-                onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
-              />
-            ) : (
-              <span className="agent-engine-preferences__external-model">
-                {tr('Configured by the active BrowserCode provider', '由当前 BrowserCode 提供商配置')}
-              </span>
-            )}
-            <datalist id={`engine-models-${item.id}`}>
-              {item.models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
-            </datalist>
-          </label>
-          <label className="agent-engine-preferences__lean">
-            <span>
-              <strong>{tr('Lean mode', '精简模式')}</strong>
-              <small>{tr('No external MCP', '不加载外部 MCP')}</small>
-            </span>
-            <button
-              type="button"
-              className="settings-pane__toggle"
-              data-on={item.leanMode}
-              disabled={saving === item.id}
-              aria-label={tr(`Toggle lean mode for ${item.displayName}`, `切换 ${item.displayName} 精简模式`)}
-              onClick={() => {
-                const next = { ...item, leanMode: !item.leanMode };
-                update(item.id, { leanMode: next.leanMode });
-                void persist(next);
-              }}
-            >
-              <span className="settings-pane__toggle-thumb" />
-            </button>
-          </label>
-        </div>
-      ))}
-      {items.length === 0 && !error && <div className="conn-card__sub">{tr('Loading agent frameworks…', '正在加载 Agent 框架…')}</div>}
-      {error && <div className="conn-card__api-key-edit"><span className="conn-card__api-key-error">{error}</span></div>}
+      )}
+      {error && <span className="conn-card__api-key-error engine-preference-controls__error">{error}</span>}
     </div>
   );
 }

@@ -64,6 +64,7 @@ export interface EnginePreferenceStatus {
   leanMode: boolean;
   models: Array<{ id: string; label: string }>;
   modelConfigurable: boolean;
+  leanModeConfigurable: boolean;
 }
 
 function codexModels(): Array<{ id: string; label: string }> {
@@ -113,7 +114,16 @@ async function handleEnginePreferencesGet(): Promise<EnginePreferenceStatus[]> {
           : adapter.id === 'pi'
             ? dynamicPiModels
             : [];
-      return { id: adapter.id, displayName: adapter.displayName, ...preference, models, modelConfigurable: adapter.id !== 'browsercode' };
+      const leanModeConfigurable = adapter.id !== 'pi';
+      return {
+        id: adapter.id,
+        displayName: adapter.displayName,
+        ...preference,
+        leanMode: leanModeConfigurable && preference.leanMode,
+        models,
+        modelConfigurable: adapter.id !== 'browsercode',
+        leanModeConfigurable,
+      };
     });
 }
 
@@ -126,8 +136,16 @@ function handleEnginePreferencesSave(
   if (!adapter) throw new Error(`Unsupported engine: ${engineId}`);
   const model = payload.model == null ? '' : assertString(payload.model, 'model', 200);
   if (typeof payload.leanMode !== 'boolean') throw new Error('leanMode must be boolean');
-  const preference = saveEnginePreference(engineId, { model, leanMode: payload.leanMode });
-  return { id: adapter.id, displayName: adapter.displayName, ...preference, models: [], modelConfigurable: adapter.id !== 'browsercode' };
+  const leanModeConfigurable = adapter.id !== 'pi';
+  const preference = saveEnginePreference(engineId, { model, leanMode: leanModeConfigurable && payload.leanMode });
+  return {
+    id: adapter.id,
+    displayName: adapter.displayName,
+    ...preference,
+    models: [],
+    modelConfigurable: adapter.id !== 'browsercode',
+    leanModeConfigurable,
+  };
 }
 
 export interface BrowserCodeProviderOption {

@@ -16,7 +16,7 @@ import { CookieBrowser, type CookieBrowserApi } from '../shared/CookieBrowser';
 import { pollInstalledStatus } from '../shared/installStatus';
 import { useToast } from '@/renderer/components/base/Toast';
 import { useI18n } from './i18n';
-import { AgentEnginePreferences } from './AgentEnginePreferences';
+import { EnginePreferenceControls } from './AgentEnginePreferences';
 
 type WaStatus = 'disconnected' | 'connecting' | 'qr_ready' | 'connected' | 'error';
 type AuthType = 'oauth' | 'apiKey' | 'none';
@@ -152,6 +152,8 @@ export function ConnectionsPane({
   const [codexStatus, setCodexStatus] = useState<EngineCliStatus>({ installed: false, authed: false });
   const [codexStatusLoaded, setCodexStatusLoaded] = useState(false);
   const [codexWaiting, setCodexWaiting] = useState(false);
+  const [piStatus, setPiStatus] = useState<EngineCliStatus>({ installed: false, authed: false });
+  const [piStatusLoaded, setPiStatusLoaded] = useState(false);
   // Surfaced from the codex login PTY when --device-auth is in play. Drives
   // the small "one-time code" block below the Codex card so users on
   // restricted networks (no localhost-callback) can still sign in.
@@ -251,6 +253,31 @@ export function ConnectionsPane({
     }
   }, [installingEngine]);
 
+  const refreshPi = useCallback(async (): Promise<EngineCliStatus | null> => {
+    const api = window.electronAPI;
+    if (!api?.sessions?.engineStatus) {
+      setPiStatusLoaded(true);
+      return null;
+    }
+    try {
+      const s = await api.sessions.engineStatus('pi');
+      const status = {
+        installed: s.installed.installed,
+        authed: s.authed.authed,
+        version: s.installed.version,
+        error: s.installed.error ?? s.authed.error,
+      };
+      setPiStatus(status);
+      if (s.installed.installed && installingEngine === 'pi') setInstallingEngine(null);
+      return status;
+    } catch (err) {
+      console.error('[connections] refreshPi failed', err);
+      return null;
+    } finally {
+      setPiStatusLoaded(true);
+    }
+  }, [installingEngine]);
+
   const refreshBrowserCode = useCallback(async (): Promise<BrowserCodeStatus['installed'] | null> => {
     const api = window.electronAPI;
     if (!api?.settings?.browserCode) {
@@ -290,6 +317,7 @@ export function ConnectionsPane({
         if (engineId === 'claude-code') return refreshClaudeCli();
         if (engineId === 'codex') return refreshCodex();
         if (engineId === 'browsercode') return refreshBrowserCode();
+        if (engineId === 'pi') return refreshPi();
         return null;
       };
       const status = result.opened
@@ -309,7 +337,7 @@ export function ConnectionsPane({
     } finally {
       setInstallingEngine((current) => (current === engineId ? null : current));
     }
-  }, [refreshBrowserCode, refreshClaudeCli, refreshCodex]);
+  }, [refreshBrowserCode, refreshClaudeCli, refreshCodex, refreshPi]);
 
   const handleUseClaudeCode = useCallback(async () => {
     const api = window.electronAPI;
@@ -384,7 +412,8 @@ export function ConnectionsPane({
     refreshOpenai();
     refreshCodex();
     refreshBrowserCode();
-  }, [refreshKey, refreshClaudeCli, refreshOpenai, refreshCodex, refreshBrowserCode]);
+    refreshPi();
+  }, [refreshKey, refreshClaudeCli, refreshOpenai, refreshCodex, refreshBrowserCode, refreshPi]);
 
   // Periodic refresh while the pane is mounted — catches external state
   // changes (user runs `claude auth logout` in a terminal, codex token
@@ -397,9 +426,10 @@ export function ConnectionsPane({
       refreshOpenai();
       refreshCodex();
       refreshBrowserCode();
+      refreshPi();
     }, 5000);
     return () => clearInterval(id);
-  }, [refreshKey, refreshClaudeCli, refreshOpenai, refreshCodex, refreshBrowserCode]);
+  }, [refreshKey, refreshClaudeCli, refreshOpenai, refreshCodex, refreshBrowserCode, refreshPi]);
 
   // Poll codex status while user completes the codex OAuth flow. Tighter
   // interval than the 5s panel refresh so the UI flips to "Signed in" the
@@ -519,6 +549,20 @@ export function ConnectionsPane({
     await refreshBrowserCode();
     toast.show({ variant: 'success', title: 'Provider key removed', message: providerId });
   }, [editingProviderId, refreshBrowserCode, toast]);
+
+  const handleBrowserCodeModel = useCallback(async (providerId: string, model: string) => {
+    const api = window.electronAPI;
+    if (!api?.settings?.browserCode) return;
+    try {
+      await api.settings.browserCode.save({ providerId, apiKey: '', lastModel: model });
+      await refreshBrowserCode();
+      setBrowserCodeError(null);
+      setBrowserCodeErrorProviderId(null);
+    } catch (err) {
+      setBrowserCodeError((err as Error).message);
+      setBrowserCodeErrorProviderId(providerId);
+    }
+  }, [refreshBrowserCode]);
 
   const [testingProviderId, setTestingProviderId] = useState<string | null>(null);
   const [testResultByProvider, setTestResultByProvider] = useState<Record<string, { ok: boolean; message: string } | undefined>>({});
@@ -707,8 +751,6 @@ export function ConnectionsPane({
         <h2 className="settings-section-header__title">{tr('Model providers', '模型提供商')}</h2>
       </div>
 
-      <AgentEnginePreferences />
-
       <div className="conn-card" aria-busy={anthropicLoading}>
         <div className="conn-card__header">
           <img
@@ -820,6 +862,7 @@ export function ConnectionsPane({
             <span className="conn-card__api-key-error">{keyError}</span>
           </div>
         )}
+        <EnginePreferenceControls engineId="claude-code" />
       </div>
 
       <div className="conn-card" aria-busy={!browserCodeLoaded && browserCodeStatus.providers.length === 0}>
@@ -938,6 +981,20 @@ export function ConnectionsPane({
                   )}
                 </div>
               </div>
+              {connected && !isEditing && (
+                <label className="engine-preference-controls engine-preference-controls--sub">
+                  <span className="conn-card__field-label">{tr('Model', '模型')}</span>
+                  <select
+                    className="conn-card__api-key-input"
+                    value={entry.lastModel ?? provider.defaultModel}
+                    onChange={(event) => { void handleBrowserCodeModel(provider.id, event.target.value); }}
+                  >
+                    {provider.models.map((model) => (
+                      <option key={model.id} value={model.id}>{model.label}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
               {!isEditing && testResultByProvider[provider.id] && (
                 <div className="conn-card__api-key-edit">
                   <span className={testResultByProvider[provider.id]!.ok ? 'conn-card__api-key-ok' : 'conn-card__api-key-error'}>
@@ -976,6 +1033,7 @@ export function ConnectionsPane({
             <span className="conn-card__api-key-error">{browserCodeError}</span>
           </div>
         )}
+        <EnginePreferenceControls engineId="browsercode" />
       </div>
 
       <div className="conn-card" aria-busy={openaiLoading}>
@@ -1129,6 +1187,43 @@ export function ConnectionsPane({
             <span className="conn-card__api-key-error">{openaiError}</span>
           </div>
         )}
+        <EnginePreferenceControls engineId="codex" />
+      </div>
+
+      <div className="conn-card" aria-busy={!piStatusLoaded}>
+        <div className="conn-card__header">
+          <span className="conn-card__icon conn-card__icon--pi" aria-hidden="true">π</span>
+          <div className="conn-card__info">
+            <div className="conn-card__title-row">
+              <span className="conn-card__name">Pi</span>
+              <span className={`conn-card__dot ${!piStatusLoaded ? 'conn-card__dot--connecting' : piStatus.installed && piStatus.authed ? 'conn-card__dot--connected' : 'conn-card__dot--disconnected'}`} />
+            </div>
+            {!piStatusLoaded ? (
+              <span className="conn-card__skeleton conn-card__skeleton--subtitle" aria-hidden="true" />
+            ) : (
+              <span className="conn-card__subtitle">
+                {!piStatus.installed
+                  ? tr('Pi CLI not installed', '尚未安装 Pi CLI')
+                  : piStatus.authed
+                    ? `${tr('Provider configured', '已配置模型提供商')}${piStatus.version ? ` · Pi v${piStatus.version}` : ''}`
+                    : tr('No model provider configured', '尚未配置模型提供商')}
+              </span>
+            )}
+          </div>
+          <div className="conn-card__actions">
+            {!piStatusLoaded && <ConnectionActionSkeleton />}
+            {piStatusLoaded && !piStatus.installed && (
+              <button
+                className="conn-card__btn conn-card__btn--primary"
+                onClick={() => handleInstallEngine('pi')}
+                disabled={installingEngine === 'pi'}
+              >
+                {installingEngine === 'pi' ? tr('Installing…', '安装中…') : tr('Install Pi', '安装 Pi')}
+              </button>
+            )}
+          </div>
+        </div>
+        <EnginePreferenceControls engineId="pi" />
       </div>
       </section>
 

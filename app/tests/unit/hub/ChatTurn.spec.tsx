@@ -99,7 +99,7 @@ describe('ChatTurn', () => {
       '.chat-step__image img, .chatv2-attachment img',
     );
     expect(image).not.toBeNull();
-    expect(image?.getAttribute('src')).toBe('chatfile://files/tmp/session/screenshot.png');
+    expect(image?.getAttribute('src')).toBe('chatfile://files/local?path=%2Ftmp%2Fsession%2Fscreenshot.png');
     act(() => root.unmount());
   });
 

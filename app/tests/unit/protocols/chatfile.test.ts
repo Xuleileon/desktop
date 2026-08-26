@@ -39,7 +39,7 @@ describe('chatfile protocol', () => {
     registerChatfileHandler();
     expect(handler).not.toBeNull();
 
-    const res = await handler!({ url: `chatfile://files${encodeURI(requestedViaSymlink)}` });
+    const res = await handler!({ url: `chatfile://files/local?path=${encodeURIComponent(requestedViaSymlink)}` });
 
     expect(res.status).toBe(200);
     expect(fetch).toHaveBeenCalledWith(pathToFileURL(fs.realpathSync(realFile)).toString());

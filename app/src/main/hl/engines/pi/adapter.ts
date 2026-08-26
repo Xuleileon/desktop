@@ -38,6 +38,14 @@ function resultPreview(result: unknown): string {
   catch { return String(result).slice(0, 4000); }
 }
 
+function terminalMessageError(message: unknown): string | null {
+  if (!message || typeof message !== 'object') return null;
+  const record = message as Record<string, unknown>;
+  if (record.role !== 'assistant') return null;
+  if (record.stopReason !== 'error' && record.stopReason !== 'aborted') return null;
+  return String(record.errorMessage ?? `Pi ${record.stopReason}`);
+}
+
 const piAdapter: EngineAdapter = {
   id: ID,
   displayName: DISPLAY,
@@ -95,7 +103,6 @@ const piAdapter: EngineAdapter = {
     if (ctx.resumeSessionId) args.push('--session', ctx.resumeSessionId);
     else args.push('--session-id', ctx.sessionId);
     if (ctx.model) args.push('--model', ctx.model);
-    if (ctx.leanMode) args.push('--no-extensions');
     return args;
   },
 
@@ -136,9 +143,9 @@ const piAdapter: EngineAdapter = {
         const narrative = textContent(message);
         if (narrative) ctx.lastNarrative = narrative;
         if (type === 'message_end') {
-          const stopReason = message.stopReason;
-          if (stopReason === 'error' || stopReason === 'aborted') {
-            return { events: [{ type: 'error', message: String(message.errorMessage ?? `Pi ${stopReason}`) }], terminalError: String(message.errorMessage ?? `Pi ${stopReason}`) };
+          const terminalError = terminalMessageError(message);
+          if (terminalError) {
+            return { events: [{ type: 'error', message: terminalError }], terminalError };
           }
           const usage = message.usage && typeof message.usage === 'object' ? message.usage as Record<string, unknown> : null;
           const cost = usage?.cost && typeof usage.cost === 'object' ? usage.cost as Record<string, unknown> : null;
@@ -191,7 +198,19 @@ const piAdapter: EngineAdapter = {
       return { events };
     }
 
+    if (type === 'auto_retry_end' && event.success === false) {
+      const terminalError = String(event.finalError ?? 'Pi retry failed');
+      return { events: [{ type: 'error', message: terminalError }], terminalError };
+    }
+
     if (type === 'agent_end' && event.willRetry !== true) {
+      const messages = Array.isArray(event.messages) ? event.messages : [];
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const terminalError = terminalMessageError(messages[i]);
+        if (terminalError) {
+          return { events: [{ type: 'error', message: terminalError }], terminalError };
+        }
+      }
       const summary = ctx.lastNarrative?.trim() || 'Pi task completed';
       mainLogger.info('pi.agentEnd', { model: ctx.currentModel, summaryLength: summary.length });
       return { events: [{ type: 'done', summary, iterations: ctx.iter }], terminalDone: true };

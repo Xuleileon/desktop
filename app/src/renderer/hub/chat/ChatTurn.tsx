@@ -482,9 +482,13 @@ function StreamingProse({
   );
 }
 
+function chatFileUrl(absPath: string): string {
+  return `chatfile://files/local?path=${encodeURIComponent(absPath)}`;
+}
+
 function FloatedImage({ entry }: { entry: OutputEntry }): React.ReactElement {
   const absPath = entry.tool ?? '';
-  const src = `chatfile://files${encodeURI(absPath)}`;
+  const src = chatFileUrl(absPath);
   return (
     <a href={src} target="_blank" rel="noreferrer" className="chat-step__image chat-step__image--floated">
       <img src={src} alt={entry.content} loading="lazy" />
@@ -503,34 +507,34 @@ function formatBytes(n?: number): string {
 
 function FileCard({ entry }: { entry: OutputEntry }): React.ReactElement {
   const absPath = entry.tool ?? '';
-  const name = entry.content || absPath.split('/').pop() || 'file';
+  const name = entry.content || absPath.split(/[\\/]/).pop() || 'file';
   const ext = name.includes('.') ? name.split('.').pop()!.toUpperCase() : '';
   const isImage = entry.fileMime?.startsWith('image/');
   const sizeLabel = formatBytes(entry.fileSize);
   const metaParts = [ext, sizeLabel].filter(Boolean);
-  const reveal = (e?: React.MouseEvent): void => {
+  const open = (e?: React.MouseEvent): void => {
     e?.preventDefault();
-    void window.electronAPI?.sessions?.revealOutput?.(absPath)
-      .catch((err) => console.error('[FileCard] revealOutput failed', err));
-  };
-  const download = (e: React.MouseEvent): void => {
-    e.preventDefault();
-    e.stopPropagation();
     void window.electronAPI?.sessions?.downloadOutput?.(absPath)
       .catch((err) => console.error('[FileCard] downloadOutput failed', err));
+  };
+  const reveal = (e: React.MouseEvent): void => {
+    e.preventDefault();
+    e.stopPropagation();
+    void window.electronAPI?.sessions?.revealOutput?.(absPath)
+      .catch((err) => console.error('[FileCard] revealOutput failed', err));
   };
   return (
     <div
       className="chat-file-card"
       role="button"
       tabIndex={0}
-      onClick={reveal}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); reveal(); } }}
-      title={`Reveal ${name} in file manager`}
+      onClick={open}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}
+      title={`Open ${name}`}
     >
       <div className="chat-file-card__thumb">
         {isImage && absPath ? (
-          <img src={`chatfile://files${encodeURI(absPath)}`} alt="" loading="lazy" />
+          <img src={chatFileUrl(absPath)} alt="" loading="lazy" />
         ) : (
           <span className="chat-file-card__ext">{ext || 'FILE'}</span>
         )}
@@ -544,13 +548,12 @@ function FileCard({ entry }: { entry: OutputEntry }): React.ReactElement {
       <button
         type="button"
         className="chat-file-card__download"
-        onClick={download}
-        aria-label={`Open ${name}`}
-        title="Open file"
+        onClick={reveal}
+        aria-label={`Show ${name} in file manager`}
+        title="Show in file manager"
       >
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
-          <path d="M8 2v8m0 0l-3-3m3 3l3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M3 12.5v.5A1.5 1.5 0 004.5 14.5h7a1.5 1.5 0 001.5-1.5v-.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          <path d="M1.75 4.25h4l1.5 1.5h7v6.5a1.5 1.5 0 01-1.5 1.5h-9.5a1.5 1.5 0 01-1.5-1.5v-8z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
         </svg>
       </button>
     </div>
@@ -723,7 +726,7 @@ function AgentEntry({
         // Fixed "files" host so Chromium's standard-scheme URL parser doesn't
         // swallow the first path segment as the authority (which lowercases
         // it). The handler ignores the host and reads from pathname.
-        const src = `chatfile://files${encodeURI(absPath)}`;
+        const src = chatFileUrl(absPath);
         return (
           <a href={src} target="_blank" rel="noreferrer" className="chat-step__image">
             <img src={src} alt={entry.content} loading="lazy" />
@@ -802,12 +805,12 @@ function renderAgentEntries(entries: OutputEntry[], isLive: boolean, sessionId?:
     if (fileBatch.length === 0) return;
     const items: AttachmentItem[] = fileBatch.map((e) => {
       const absPath = e.tool ?? '';
-      const name = e.content || absPath.split('/').pop() || 'file';
+       const name = e.content || absPath.split(/[\\/]/).pop() || 'file';
       const ext = name.includes('.') ? name.split('.').pop()!.toUpperCase() : '';
       const sizeLabel = formatBytes(e.fileSize);
       const meta = [ext, sizeLabel].filter(Boolean).join(' · ');
       const src = e.fileMime?.startsWith('image/') && absPath
-        ? `chatfile://files${encodeURI(absPath)}`
+        ? chatFileUrl(absPath)
         : undefined;
       return {
         key: e.id,
@@ -817,8 +820,8 @@ function renderAgentEntries(entries: OutputEntry[], isLive: boolean, sessionId?:
         src,
         onClick: absPath
           ? () => {
-              const request = window.electronAPI?.sessions?.revealOutput?.(absPath);
-              request?.catch((err) => console.error('[Attachments] revealOutput failed', err));
+               const request = window.electronAPI?.sessions?.downloadOutput?.(absPath);
+               request?.catch((err) => console.error('[Attachments] downloadOutput failed', err));
             }
           : undefined,
       };
