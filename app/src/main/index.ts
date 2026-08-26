@@ -107,6 +107,7 @@ import type { HlEvent } from '../shared/session-schemas';
 import { AccountStore } from './identity/AccountStore';
 import { createOnboardingWindow } from './identity/onboardingWindow';
 import { registerOnboardingHandlers } from './identity/onboardingHandlers';
+import { windowsExplorerRevealSpec } from './windowsReveal';
 import { loadBrowserCodeConfig } from './identity/authStore';
 import { registerApiKeyHandlers } from './settings/apiKeyIpc';
 import { registerConsentHandlers } from './consentIpc';
@@ -1771,10 +1772,12 @@ app.whenReady().then(async () => {
     }
     if (process.platform === 'win32') {
       const explorerPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'explorer.exe');
+      const revealSpec = windowsExplorerRevealSpec(resolvedPath, fs.statSync(resolvedPath).isDirectory());
       await new Promise<void>((resolve, reject) => {
-        const explorer = spawn(explorerPath, ['/select,', resolvedPath], {
+        const explorer = spawn(explorerPath, revealSpec.args, {
           detached: true,
           stdio: 'ignore',
+          windowsVerbatimArguments: revealSpec.windowsVerbatimArguments,
         });
         explorer.once('error', reject);
         explorer.once('spawn', () => {
@@ -1782,7 +1785,7 @@ app.whenReady().then(async () => {
           resolve();
         });
       });
-      mainLogger.info('main.sessions:reveal-output', { path: resolvedPath, platform: process.platform, mode: 'explorer-select' });
+      mainLogger.info('main.sessions:reveal-output', { path: resolvedPath, platform: process.platform, mode: revealSpec.mode });
     } else {
       shell.showItemInFolder(resolvedPath);
       mainLogger.info('main.sessions:reveal-output', { path: resolvedPath, platform: process.platform, mode: 'select-file' });
