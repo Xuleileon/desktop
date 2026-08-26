@@ -106,12 +106,16 @@ describe('TaskInput', () => {
     const { container, root } = renderTaskInput(onSubmit);
 
     await act(async () => { await Promise.resolve(); });
-    const modelSelect = container.querySelector('.task-model-picker__select');
-    expect(modelSelect).toBeInstanceOf(HTMLSelectElement);
+    const modelToggle = container.querySelector('.task-model-picker__toggle');
+    expect(modelToggle).toBeInstanceOf(HTMLButtonElement);
     await act(async () => {
-      const select = modelSelect as HTMLSelectElement;
-      select.value = 'opus';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
+      (modelToggle as HTMLButtonElement).click();
+    });
+    const opusOption = Array.from(container.querySelectorAll<HTMLButtonElement>('.task-model-picker__menu .engine-picker__item'))
+      .find((button) => button.textContent?.includes('Claude Opus'));
+    expect(opusOption).toBeInstanceOf(HTMLButtonElement);
+    await act(async () => {
+      opusOption?.click();
       setTextareaValue(getTextarea(container), 'Run this task');
     });
     act(() => {

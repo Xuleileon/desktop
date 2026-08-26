@@ -202,6 +202,11 @@ function materializeBrowserHarnessJs(): void {
     entries: Object.entries(STOCK_BROWSER_HARNESS_JS),
     logName: 'browserHarnessJs',
     executableBasenames: new Set(['browser-harness-js']),
+    // REPL processes may still have the launcher open while the desktop app
+    // restarts. Never delete a live runtime tree first: doing so can remove
+    // repl.ts and then fail on the locked launcher, leaving a half-installed
+    // harness that silently falls back to an older global CLI.
+    overlayOnly: true,
   });
 }
 
@@ -212,6 +217,7 @@ function materializeAgentSkill(): void {
     entries: Object.entries(STOCK_AGENT_SKILL),
     logName: 'agentSkill',
     executableBasenames: new Set(['agent-skill']),
+    overlayOnly: true,
   });
 }
 
@@ -243,57 +249,61 @@ function materializeRawTree(opts: {
   logName: string;
   emptyHint?: string;
   executableBasenames?: Set<string>;
+  overlayOnly?: boolean;
 }): void {
-  const { target, prefix, entries, logName, emptyHint, executableBasenames } = opts;
+  const { target, prefix, entries, logName, emptyHint, executableBasenames, overlayOnly = false } = opts;
   if (entries.length === 0) {
     mainLogger.warn(`harness.bootstrap.${logName}.empty`, emptyHint ? { hint: emptyHint } : {});
     return;
   }
 
   const hadExistingTree = fs.existsSync(target);
-  let overlayExistingTree = false;
-  try {
-    // Windows can transiently report ENOTEMPTY while an agent process is
-    // releasing a file in this tree. Let Node retry those documented
-    // transient removal errors before falling back to an in-place refresh.
-    fs.rmSync(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  } catch (err) {
-    if (!hadExistingTree) {
-      mainLogger.error(`harness.bootstrap.${logName}.clear.failed`, { target, error: (err as Error).message });
-      throw err;
+  let overlayExistingTree = overlayOnly && hadExistingTree;
+  if (!overlayOnly) {
+    try {
+      fs.rmSync(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch (err) {
+      if (!hadExistingTree) {
+        mainLogger.error(`harness.bootstrap.${logName}.clear.failed`, { target, error: (err as Error).message });
+        throw err;
+      }
+      overlayExistingTree = true;
+      mainLogger.warn(`harness.bootstrap.${logName}.clear.retryExhausted`, {
+        target,
+        error: (err as Error).message,
+        fallback: 'overlay-existing-tree',
+      });
     }
-    overlayExistingTree = true;
-    mainLogger.warn(`harness.bootstrap.${logName}.clear.retryExhausted`, {
-      target,
-      error: (err as Error).message,
-      fallback: 'overlay-existing-tree',
-    });
   }
 
   let bytes = 0;
-  try {
-    for (const [modulePath, content] of entries) {
-      const rel = modulePath.slice(prefix.length);
-      const outPath = path.join(target, rel);
+  let failedFiles = 0;
+  for (const [modulePath, content] of entries) {
+    const rel = modulePath.slice(prefix.length);
+    const outPath = path.join(target, rel);
+    try {
       fs.mkdirSync(path.dirname(outPath), { recursive: true });
-      fs.writeFileSync(outPath, content, 'utf-8');
+      let unchanged = false;
+      try { unchanged = fs.readFileSync(outPath, 'utf-8') === content; }
+      catch { /* missing or held open: attempt the write below */ }
+      if (!unchanged) fs.writeFileSync(outPath, content, 'utf-8');
       if (executableBasenames?.has(path.basename(outPath))) fs.chmodSync(outPath, 0o755);
       bytes += content.length;
+    } catch (err) {
+      failedFiles += 1;
+      mainLogger.warn(`harness.bootstrap.${logName}.fileSkipped`, {
+        path: outPath,
+        error: (err as Error).message,
+      });
+      if (!overlayExistingTree) throw err;
     }
-  } catch (err) {
-    mainLogger.error(`harness.bootstrap.${logName}.write.failed`, {
-      target,
-      error: (err as Error).message,
-      preservedExistingTree: overlayExistingTree,
-    });
-    if (!overlayExistingTree) throw err;
-    return;
   }
 
   mainLogger.info(`harness.bootstrap.${logName}.wrote`, {
     target,
     files: entries.length,
+    failedFiles,
     bytes,
-    mode: overlayExistingTree ? 'overlay' : 'replace',
+    mode: overlayExistingTree || overlayOnly ? 'overlay' : 'replace',
   });
 }

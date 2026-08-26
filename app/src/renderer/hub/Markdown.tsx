@@ -56,7 +56,7 @@ export function linkifyPathsToReact(text: string): React.ReactNode[] {
         className="md-output-path"
         onClick={(e) => {
           e.preventDefault();
-          window.electronAPI?.sessions?.downloadOutput?.(p).catch((err) => console.error('[linkify] download failed', err));
+          window.electronAPI?.sessions?.revealOutput?.(p).catch((err) => console.error('[linkify] reveal failed', err));
         }}
         title={`Open ${p}`}
       >{p}</a>,
@@ -92,8 +92,8 @@ export function Markdown({
               const relPath = href.slice(OUTPUT_PATH_SCHEME.length);
               const onClick = (e: React.MouseEvent) => {
                 e.preventDefault();
-                window.electronAPI?.sessions?.downloadOutput?.(relPath).catch((err) => {
-                  console.error('[md] downloadOutput failed', err);
+                window.electronAPI?.sessions?.revealOutput?.(relPath).catch((err) => {
+                  console.error('[md] revealOutput failed', err);
                 });
               };
               return (

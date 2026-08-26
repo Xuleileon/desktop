@@ -441,9 +441,21 @@ app.whenReady().then(async () => {
   // a stranger's browser — `/json/list` returns targets the agent has no
   // access to, and `/devtools/page/<id>` gives 404/403. Log loudly on
   // mismatch so users hit a clear error instead of mysterious CDP failures.
-  verifyCdpOwnership(resolvedCdp.port, 2000, appBrowserIdentity.userAgent).then((v) => {
+  void (async () => {
+    let v = await verifyCdpOwnership(resolvedCdp.port, 2000, appBrowserIdentity.userAgent);
+    let attempts = 1;
+    while (!v.ok && !v.userAgent && attempts < 5) {
+      await new Promise((resolve) => setTimeout(resolve, attempts * 250));
+      attempts += 1;
+      v = await verifyCdpOwnership(resolvedCdp.port, 2000, appBrowserIdentity.userAgent);
+    }
     if (v.ok) {
-      mainLogger.info('main.cdp.verified', { port: resolvedCdp.port, browser: v.browser, userAgent: v.userAgent });
+      mainLogger.info('main.cdp.verified', {
+        port: resolvedCdp.port,
+        browser: v.browser,
+        userAgent: v.userAgent,
+        attempts,
+      });
     } else {
       mainLogger.error('main.cdp.verifyFailed', {
         port: resolvedCdp.port,
@@ -451,12 +463,13 @@ app.whenReady().then(async () => {
         browser: v.browser ?? null,
         userAgent: v.userAgent ?? null,
         error: v.error ?? null,
+        attempts,
         hint: v.userAgent
           ? `CDP on :${resolvedCdp.port} responded with an unexpected User-Agent — another Chromium-based process likely owns this port. Close it (or pass --remote-debugging-port=<free port>) and restart.`
           : `Could not reach CDP on :${resolvedCdp.port}; Electron may not have bound it (another process likely holds it).`,
       });
     }
-  });
+  })();
 
   if (process.platform === 'darwin' && app.dock) {
     try {

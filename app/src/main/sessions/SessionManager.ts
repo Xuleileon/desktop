@@ -14,7 +14,10 @@ import {
 
 export type { AgentSession, SessionStatus, SessionEvents };
 
-const STUCK_TIMEOUT_MS = 30_000;
+// Browser and shell tools routinely wait on page load, CDP, or a user login
+// for longer than 30 seconds. Marking those healthy in-flight calls as stuck
+// makes the UI claim failure while the agent is still making progress.
+const STUCK_TIMEOUT_MS = 120_000;
 
 type UserInputEvent = Extract<HlEvent, { type: 'user_input' }>;
 type AttachmentRow = { id: number; name: string; mime: string; bytes: Buffer; size: number; turn_index: number };

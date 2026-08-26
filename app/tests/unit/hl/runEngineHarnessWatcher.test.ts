@@ -433,4 +433,51 @@ describe('runEngine harness watcher', () => {
     });
     expect(resolvedModels).toEqual([{ model: 'alibaba/qwen3.6-plus', source: 'config' }]);
   });
+
+  test('keeps Pi provider-qualified model ids durable when Pi reports only the model name', async () => {
+    const adapter: EngineAdapter = {
+      id: 'pi',
+      displayName: 'Pi Test',
+      binaryName: process.execPath,
+      async probeInstalled() { return { installed: true }; },
+      async probeAuthed() { return { authed: true }; },
+      async openLoginInTerminal() { return { opened: false }; },
+      buildSpawnArgs() {
+        return ['-e', [
+          "console.log(JSON.stringify({ type: 'model' }));",
+          "console.log(JSON.stringify({ type: 'done' }));",
+        ].join('')];
+      },
+      buildEnv(_ctx: SpawnContext, baseEnv: NodeJS.ProcessEnv) { return baseEnv; },
+      wrapPrompt(ctx: SpawnContext) { return ctx.prompt; },
+      parseLine(line, ctx) {
+        const event = JSON.parse(line) as { type?: string };
+        if (event.type === 'model') {
+          ctx.currentModel = 'composer-2.5-fast';
+          return { events: [] };
+        }
+        if (event.type === 'done') return { events: [{ type: 'done', summary: 'ok', iterations: 1 }] };
+        return { events: [] };
+      },
+    };
+    register(adapter);
+    const resolvedModels: Array<{ model: string; source: 'config' | 'engine' }> = [];
+
+    await runEngine({
+      engineId: 'pi',
+      model: 'cpa-zeabur-copy/composer-2.5-fast',
+      prompt: 'test',
+      sessionId: 'pi-model-session',
+      webContents: createWebContents() as unknown as WebContents,
+      cdpPort: 9222,
+      harnessDir,
+      onEvent: () => undefined,
+      onModelResolved: (info) => resolvedModels.push(info),
+    });
+
+    expect(resolvedModels).toEqual([{
+      model: 'cpa-zeabur-copy/composer-2.5-fast',
+      source: 'config',
+    }]);
+  });
 });

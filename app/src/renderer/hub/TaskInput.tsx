@@ -10,6 +10,7 @@ import React, {
 } from 'react';
 import { INPUT_PLACEHOLDER } from './constants';
 import { EnginePicker, EngineLogo } from './EnginePicker';
+import { ModelPicker } from './ModelPicker';
 import { AttachmentList, type AttachmentItem } from './chat-v2/Attachments';
 import { useI18n } from './i18n';
 import { loadPreferences, type EnginePreferenceView } from './AgentEnginePreferences';
@@ -282,7 +283,6 @@ export const TaskInput = forwardRef<TaskInputHandle, TaskInputProps>(function Ta
   const availableModels = currentEnginePreference?.models ?? [];
   const showModelPicker = !lockedEngine && Boolean(currentEnginePreference)
     && (availableModels.length > 0 || currentEnginePreference?.modelConfigurable);
-  const hasCustomCurrentModel = currentModel.length > 0 && !availableModels.some((model) => model.id === currentModel);
 
   useImperativeHandle(ref, () => ({
     addFiles: (files) => addFiles(files),
@@ -360,23 +360,13 @@ export const TaskInput = forwardRef<TaskInputHandle, TaskInputProps>(function Ta
             : <EnginePicker value={engine} onChange={onEngineChange} />
           }
           {showModelPicker && (
-            <label className="task-model-picker">
-              <span className="sr-only">{tr('Model', '模型')}</span>
-              <select
-                className="task-model-picker__select"
-                value={currentModel}
-                onChange={(event) => onModelChange(event.target.value)}
-                onClick={(event) => event.stopPropagation()}
-                aria-label={tr('Model', '模型')}
-                title={tr('Select model for this task', '选择本次任务使用的模型')}
-              >
-                <option value="">{tr('Default model', '默认模型')}</option>
-                {hasCustomCurrentModel && <option value={currentModel}>{currentModel}</option>}
-                {availableModels.map((model) => (
-                  <option key={model.id} value={model.id}>{model.label}</option>
-                ))}
-              </select>
-            </label>
+            <ModelPicker
+              value={currentModel}
+              options={availableModels}
+              defaultLabel={tr('Default model', '默认模型')}
+              ariaLabel={tr('Select model for this task', '选择本次任务使用的模型')}
+              onChange={onModelChange}
+            />
           )}
           <input
             ref={fileInputRef}

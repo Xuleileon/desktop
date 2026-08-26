@@ -100,6 +100,32 @@ describe('bootstrapHarness browser-harness-js materialization', () => {
     }
   });
 
+  test('restores the rest of the runtime when one launcher is locked', () => {
+    bootstrapHarness();
+    const cli = path.join(browserHarnessJsDir(), 'sdk', 'browser-harness-js');
+    const repl = path.join(browserHarnessJsDir(), 'sdk', 'repl.ts');
+    fs.writeFileSync(cli, '# stale launcher held by a previous process\n');
+    fs.rmSync(repl, { force: true });
+
+    const originalWriteFileSync = fs.writeFileSync.bind(fs);
+    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation(((candidate: fs.PathOrFileDescriptor, data: string | NodeJS.ArrayBufferView, options?: fs.WriteFileOptions) => {
+      if (path.resolve(String(candidate)) === path.resolve(cli)) {
+        const err = new Error(`EPERM: operation not permitted, open '${cli}'`) as NodeJS.ErrnoException;
+        err.code = 'EPERM';
+        throw err;
+      }
+      return originalWriteFileSync(candidate, data, options);
+    }) as typeof fs.writeFileSync);
+
+    try {
+      expect(() => bootstrapHarness()).not.toThrow();
+      expect(fs.existsSync(repl)).toBe(true);
+      expect(fs.readFileSync(repl, 'utf-8')).toContain('connectToAssignedTarget');
+    } finally {
+      writeSpy.mockRestore();
+    }
+  });
+
   test('rejects traversal and absolute skill IDs before converting to paths', () => {
     const root = path.join(mockState.userData, 'harness');
 

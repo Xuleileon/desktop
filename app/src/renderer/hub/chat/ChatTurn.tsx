@@ -518,8 +518,8 @@ function FileCard({ entry }: { entry: OutputEntry }): React.ReactElement {
   const metaParts = [ext, sizeLabel].filter(Boolean);
   const open = (e?: React.MouseEvent): void => {
     e?.preventDefault();
-    void window.electronAPI?.sessions?.downloadOutput?.(absPath)
-      .catch((err) => console.error('[FileCard] downloadOutput failed', err));
+    void window.electronAPI?.sessions?.revealOutput?.(absPath)
+      .catch((err) => console.error('[FileCard] revealOutput failed', err));
   };
   const reveal = (e: React.MouseEvent): void => {
     e.preventDefault();
@@ -838,8 +838,8 @@ function renderAgentEntries(entries: OutputEntry[], isLive: boolean, sessionId?:
         src,
         onClick: absPath
           ? () => {
-               const request = window.electronAPI?.sessions?.downloadOutput?.(absPath);
-               request?.catch((err) => console.error('[Attachments] downloadOutput failed', err));
+               const request = window.electronAPI?.sessions?.revealOutput?.(absPath);
+               request?.catch((err) => console.error('[Attachments] revealOutput failed', err));
             }
           : undefined,
       };
