@@ -4,9 +4,11 @@ All notable changes to the Agentic Browser project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.0.34] - 2026-08-27
+## [0.0.35] - 2026-08-27
 
-This release contains every change since `v0.0.33`.
+This release contains every change since `v0.0.33`. The intermediate `v0.0.34`
+source tag was not published after its Windows package validation exposed a
+missing-manifest build failure; `0.0.35` supersedes it.
 
 ### Added
 
@@ -25,6 +27,7 @@ This release contains every change since `v0.0.33`.
 - **REPL ownership enforcement** — expose the owning task and target in health responses, and reject start, status, stop, or restart operations when a live port belongs to another conversation.
 - **Browser target access control** — force Browser Harness connections through the assigned local CDP endpoint, hide unrelated targets, reject cross-target attachment/switching, and block target-creation and browser-global mutations from a conversation-scoped session.
 - **Windows file reveal and task resume** (`854a18b`) — retained the awaited Windows reveal path while preventing a completed-state check from disabling valid follow-up messages.
+- **Packaged application manifest** — retain the root `package.json` while filtering source files for the Vite package, allowing Electron Packager and the production-dependency hook to complete reliably.
 
 ### Verification
 
@@ -33,7 +36,7 @@ This release contains every change since `v0.0.33`.
 - Shell launcher syntax validation and live two-owner REPL rejection passed.
 - Full unit suite: 695 passed, 5 skipped; 7 pre-existing Windows portability failures remain in four unrelated test files.
 
-**Full source range:** `v0.0.33..v0.0.34`
+**Full source range:** `v0.0.33..v0.0.35`
 
 ## [0.0.33] - 2026-08-27
 

@@ -106,11 +106,14 @@ const config: ForgeConfig = {
     name: 'Browser Use',
     executableName: 'browser-use-desktop',
 
-    // The Vite plugin expects packaged app contents to come only from .vite.
+    // The Vite plugin expects packaged application code to come only from
+    // .vite, but Electron Packager still requires the root package manifest.
     // Production externals are installed back into the build path in the
     // packageAfterPrune hook below, and app-update.yml is copied as a resource.
     ignore: (file) => {
       if (!file) return false;
+      const normalized = file.split(path.sep).join('/');
+      if (normalized === '/package.json' || normalized === 'package.json') return false;
       return !isViteOutputPath(file);
     },
 
