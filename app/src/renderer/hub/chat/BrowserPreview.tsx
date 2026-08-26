@@ -73,7 +73,7 @@ export function BrowserPreview({ sessionId, onExpand }: BrowserPreviewProps): Re
 
   useEffect(() => {
     const api = window.electronAPI;
-    if (!api || !sessionInfo.hasBrowser) {
+    if (!api || !sessionInfo.hasBrowser || !hasPreviewUrl) {
       setFrame(null);
       return;
     }
@@ -111,7 +111,7 @@ export function BrowserPreview({ sessionId, onExpand }: BrowserPreviewProps): Re
       });
       api.sessions.previewStop(sessionId, ownerToken).catch(() => {});
     };
-  }, [sessionId, sessionInfo.hasBrowser]);
+  }, [hasPreviewUrl, sessionId, sessionInfo.hasBrowser]);
 
   const onClick = useCallback(() => {
     previewLog('expand.click', { sessionId, frames: frameCountRef.current });

@@ -70,6 +70,7 @@ describe('BrowserPreview', () => {
     expect(container.querySelector('.browser-preview__wrap')).toBeNull();
     expect(container.querySelector('.browser-preview__placeholder')).toBeNull();
     expect(container.querySelector('.browser-preview__img')).toBeNull();
+    expect(window.electronAPI?.sessions.previewStart).not.toHaveBeenCalled();
 
     act(() => root.unmount());
   });
