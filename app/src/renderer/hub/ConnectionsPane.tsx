@@ -16,6 +16,7 @@ import { CookieBrowser, type CookieBrowserApi } from '../shared/CookieBrowser';
 import { pollInstalledStatus } from '../shared/installStatus';
 import { useToast } from '@/renderer/components/base/Toast';
 import { useI18n } from './i18n';
+import { AgentEnginePreferences } from './AgentEnginePreferences';
 
 type WaStatus = 'disconnected' | 'connecting' | 'qr_ready' | 'connected' | 'error';
 type AuthType = 'oauth' | 'apiKey' | 'none';
@@ -705,6 +706,8 @@ export function ConnectionsPane({
       <div className="settings-section-header">
         <h2 className="settings-section-header__title">{tr('Model providers', '模型提供商')}</h2>
       </div>
+
+      <AgentEnginePreferences />
 
       <div className="conn-card" aria-busy={anthropicLoading}>
         <div className="conn-card__header">

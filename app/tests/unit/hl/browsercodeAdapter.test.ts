@@ -68,6 +68,12 @@ describe('browsercode adapter stdin payload mode', () => {
     expect(wrappedPrompt).toContain('likely to repeat, long-running enough to justify reuse, or generally applicable');
     expect(wrappedPrompt).toContain('Do not write skills for one-off facts/calculations');
   });
+
+  it('uses BrowserCode pure mode when lean mode is enabled', () => {
+    const adapter = browserCodeAdapter();
+    const ctx = { ...spawnContext(), leanMode: true };
+    expect(adapter.buildSpawnArgs(ctx, adapter.wrapPrompt(ctx))).toContain('--pure');
+  });
 });
 
 describe('browsercode adapter tool parsing', () => {

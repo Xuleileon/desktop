@@ -28,6 +28,8 @@ export interface SpawnContext {
   providerId?: string;
   /** Optional model id selected for this run. */
   model?: string;
+  /** Skip user-configured MCP servers and optional agent extensions. */
+  leanMode?: boolean;
   /** List of attachment paths (relative to harnessDir) the adapter may mention in wrappedPrompt. */
   attachmentRefs: Array<{ relPath: string; mime: string; size: number }>;
 }

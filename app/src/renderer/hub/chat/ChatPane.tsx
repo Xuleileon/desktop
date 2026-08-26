@@ -314,7 +314,10 @@ export function ChatPane({ sessionId, onSwitchToBrowser, onExit }: ChatPaneProps
           {header.engine === 'claude-code' && (
             <img className="pane__engine-icon" src={claudeCodeLogo} alt="Claude Code" title="Claude Code" />
           )}
-          {header.model && header.engine === 'browsercode' && (
+          {header.engine === 'pi' && (
+            <span className="pane__engine-icon pane__engine-icon--pi" title="Pi Agent">π</span>
+          )}
+          {header.model && (
             <span className="pane__model-badge" title={`Model: ${header.model}`}>
               {header.model.includes('/') ? header.model.split('/').pop() : header.model}
             </span>

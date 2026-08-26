@@ -142,6 +142,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
       setActive: (payload: { providerId: string }): Promise<void> =>
         ipcRenderer.invoke('settings:browsercode:set-active', payload),
     },
+    enginePreferences: {
+      get: (): Promise<Array<{
+        id: string;
+        displayName: string;
+        model: string;
+        leanMode: boolean;
+        models: Array<{ id: string; label: string }>;
+        modelConfigurable: boolean;
+      }>> => ipcRenderer.invoke('settings:engine-preferences:get'),
+      save: (payload: { engineId: string; model: string; leanMode: boolean }): Promise<void> =>
+        ipcRenderer.invoke('settings:engine-preferences:save', payload),
+    },
     privacy: {
       get: (): Promise<{ telemetry: boolean; telemetryUpdatedAt: string | null; version: number }> =>
         ipcRenderer.invoke('consent:get'),

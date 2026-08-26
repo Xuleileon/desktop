@@ -17,6 +17,7 @@ const ENGINE_DISPLAY_NAMES: Record<string, string> = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
   browsercode: 'BrowserCode',
+  pi: 'Pi Agent',
 };
 import {
   classifyAttachmentMime,

@@ -47,6 +47,10 @@ const INSTALLERS: Record<string, InstallSpec> = {
       return 'curl -fsSL https://bcode.sh/install | bash';
     },
   },
+  pi: {
+    displayName: 'Pi Agent',
+    command: () => 'npm install -g @earendil-works/pi-coding-agent',
+  },
 };
 
 const INSTALL_TIMEOUT_MS = 10 * 60 * 1000;

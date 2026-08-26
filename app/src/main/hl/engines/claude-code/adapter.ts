@@ -153,6 +153,14 @@ const claudeCodeAdapter: EngineAdapter = {
       '--verbose',
       '--dangerously-skip-permissions',
     ];
+    if (_ctx.model) args.push('--model', _ctx.model);
+    if (_ctx.leanMode) {
+      // Claude's supported troubleshooting mode disables MCP, plugins, hooks
+      // and auto-loaded customizations while preserving auth/model/built-ins.
+      // The Browser Use harness remains available through our explicit prompt,
+      // PATH injection and browser-harness-js CLI.
+      args.push('--safe-mode');
+    }
     if (_ctx.resumeSessionId) args.push('--resume', _ctx.resumeSessionId);
     args.push(wrappedPrompt);
     return args;

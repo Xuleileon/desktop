@@ -116,6 +116,7 @@ const browserCodeAdapter: EngineAdapter = {
   buildSpawnArgs(ctx: SpawnContext): string[] {
     const model = ctx.model || DEFAULT_MODEL;
     const args = ['run', '--format', 'json', '--dangerously-skip-permissions', '--model', model];
+    if (ctx.leanMode) args.push('--pure');
     if (ctx.resumeSessionId) args.push('--session', ctx.resumeSessionId);
     for (const a of ctx.attachmentRefs) args.push('--file', a.relPath);
     return args;

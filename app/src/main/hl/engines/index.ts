@@ -7,6 +7,7 @@
 import './claude-code/adapter';
 import './codex/adapter';
 import './browsercode/adapter';
+import './pi/adapter';
 
 export { runEngine } from './runEngine';
 export { get as getAdapter, list as listAdapters, DEFAULT_ENGINE_ID } from './registry';

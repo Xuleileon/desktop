@@ -1028,7 +1028,10 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
           {session.engine === 'claude-code' && (
             <img className="pane__engine-icon" src={claudeCodeLogo} alt="Claude Code" title="Claude Code" />
           )}
-          {session.model && session.engine === 'browsercode' && (
+          {session.engine === 'pi' && (
+            <span className="pane__engine-icon pane__engine-icon--pi" title="Pi Agent">π</span>
+          )}
+          {session.model && (
             <span className="pane__model-badge" title={`Model: ${session.model}`}>
               {session.model.includes('/') ? session.model.split('/').pop() : session.model}
             </span>

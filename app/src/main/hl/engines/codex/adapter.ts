@@ -142,10 +142,13 @@ const codexAdapter: EngineAdapter = {
     // getStdinPayload below for why we never pass the prompt via argv.
     // The bypass flag skips sandbox + approvals, mirroring Claude Code's
     // --dangerously-skip-permissions for this app-managed harness.
+    const options = ['--json', BYPASS_APPROVALS_FLAG];
+    if (ctx.model) options.push('--model', ctx.model);
+    if (ctx.leanMode) options.push('--ignore-user-config');
     if (ctx.resumeSessionId) {
-      return ['exec', 'resume', '--json', BYPASS_APPROVALS_FLAG, ctx.resumeSessionId, '-'];
+      return ['exec', 'resume', ...options, ctx.resumeSessionId, '-'];
     }
-    return ['exec', '--json', BYPASS_APPROVALS_FLAG, '-'];
+    return ['exec', ...options, '-'];
   },
 
   getStdinPayload(_ctx: SpawnContext, wrappedPrompt: string): string {

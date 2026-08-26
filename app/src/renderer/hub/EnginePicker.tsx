@@ -37,6 +37,9 @@ export function EngineLogo({ id }: { id: string }): React.ReactElement {
   if (id === 'browsercode') {
     return <span className="engine-logo" dangerouslySetInnerHTML={{ __html: opencodeLogoSrc as string }} />;
   }
+  if (id === 'pi') {
+    return <span className="engine-logo engine-logo--pi" aria-label="Pi Agent">π</span>;
+  }
   return (
     <span className="engine-logo">
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none">

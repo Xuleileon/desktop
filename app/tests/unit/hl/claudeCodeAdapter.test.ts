@@ -90,4 +90,14 @@ describe('claude-code adapter spawn args', () => {
     expect(wrappedPrompt).toContain('likely to repeat, long-running enough to justify reuse, or generally applicable');
     expect(wrappedPrompt).toContain('Do not write skills for one-off facts/calculations');
   });
+
+  it('passes the selected model and isolates MCP servers in lean mode', async () => {
+    const adapter = await claudeCodeAdapter();
+    const ctx = { ...spawnContext(), model: 'opus', leanMode: true };
+    const args = adapter.buildSpawnArgs(ctx, adapter.wrapPrompt(ctx));
+
+    expect(args).toContain('--model');
+    expect(args).toContain('opus');
+    expect(args).toContain('--safe-mode');
+  });
 });

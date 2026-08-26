@@ -6,6 +6,9 @@
  */
 
 import { app, ipcMain } from 'electron';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { mainLogger } from '../logger';
 import { assertString } from '../ipc-validators';
 import {
@@ -23,6 +26,8 @@ import {
 } from '../identity/authStore';
 import { probeClaudeAuthStatus } from '../identity/claudeCodeAuth';
 import { spawnCli } from '../hl/engines/cliSpawn';
+import { list as listAdapters } from '../hl/engines/registry';
+import { loadEnginePreference, saveEnginePreference } from './enginePreferences';
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -49,6 +54,81 @@ const CH_BCODE_SAVE = 'settings:browsercode:save';
 const CH_BCODE_TEST = 'settings:browsercode:test';
 const CH_BCODE_DELETE = 'settings:browsercode:delete';
 const CH_BCODE_SET_ACTIVE = 'settings:browsercode:set-active';
+const CH_ENGINE_PREFS_GET = 'settings:engine-preferences:get';
+const CH_ENGINE_PREFS_SAVE = 'settings:engine-preferences:save';
+
+export interface EnginePreferenceStatus {
+  id: string;
+  displayName: string;
+  model: string;
+  leanMode: boolean;
+  models: Array<{ id: string; label: string }>;
+  modelConfigurable: boolean;
+}
+
+function codexModels(): Array<{ id: string; label: string }> {
+  try {
+    const codexRoot = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+    const parsed = JSON.parse(fs.readFileSync(path.join(codexRoot, 'models_cache.json'), 'utf8')) as {
+      models?: Array<{ slug?: unknown; display_name?: unknown; visibility?: unknown }>;
+    };
+    return (parsed.models ?? [])
+      .filter((model) => typeof model.slug === 'string' && model.visibility !== 'hidden')
+      .map((model) => ({ id: model.slug as string, label: typeof model.display_name === 'string' ? model.display_name : model.slug as string }));
+  } catch {
+    return [];
+  }
+}
+
+async function piModels(): Promise<Array<{ id: string; label: string }>> {
+  const result = await new Promise<{ stdout: string }>((resolve) => {
+    let child;
+    try { child = spawnCli('pi', ['--list-models']); }
+    catch { resolve({ stdout: '' }); return; }
+    let stdout = '';
+    const timer = setTimeout(() => { try { child.kill('SIGTERM'); } catch { /* closed */ } }, 15_000);
+    child.stdout.on('data', (chunk) => { if (stdout.length < 512_000) stdout += String(chunk); });
+    child.on('error', () => { clearTimeout(timer); resolve({ stdout: '' }); });
+    child.on('close', () => { clearTimeout(timer); resolve({ stdout }); });
+  });
+  return result.stdout.split(/\r?\n/).slice(1).flatMap((line) => {
+    const match = line.trim().match(/^(\S+)\s+(\S+)\s+/);
+    return match ? [{ id: `${match[1]}/${match[2]}`, label: `${match[1]} / ${match[2]}` }] : [];
+  });
+}
+
+async function handleEnginePreferencesGet(): Promise<EnginePreferenceStatus[]> {
+  const dynamicPiModels = await piModels();
+  return listAdapters()
+    .map((adapter) => {
+      const preference = loadEnginePreference(adapter.id);
+      const models = adapter.id === 'claude-code'
+        ? [
+          { id: 'sonnet', label: 'Claude Sonnet' },
+          { id: 'opus', label: 'Claude Opus' },
+          { id: 'haiku', label: 'Claude Haiku' },
+        ]
+        : adapter.id === 'codex'
+          ? codexModels()
+          : adapter.id === 'pi'
+            ? dynamicPiModels
+            : [];
+      return { id: adapter.id, displayName: adapter.displayName, ...preference, models, modelConfigurable: adapter.id !== 'browsercode' };
+    });
+}
+
+function handleEnginePreferencesSave(
+  _event: Electron.IpcMainInvokeEvent,
+  payload: { engineId?: unknown; model?: unknown; leanMode?: unknown },
+): EnginePreferenceStatus {
+  const engineId = assertString(payload?.engineId, 'engineId', 80);
+  const adapter = listAdapters().find((entry) => entry.id === engineId);
+  if (!adapter) throw new Error(`Unsupported engine: ${engineId}`);
+  const model = payload.model == null ? '' : assertString(payload.model, 'model', 200);
+  if (typeof payload.leanMode !== 'boolean') throw new Error('leanMode must be boolean');
+  const preference = saveEnginePreference(engineId, { model, leanMode: payload.leanMode });
+  return { id: adapter.id, displayName: adapter.displayName, ...preference, models: [], modelConfigurable: adapter.id !== 'browsercode' };
+}
 
 export interface BrowserCodeProviderOption {
   id: string;
@@ -590,5 +670,7 @@ export function registerApiKeyHandlers(): void {
   ipcMain.handle(CH_BCODE_TEST, handleBrowserCodeTest);
   ipcMain.handle(CH_BCODE_DELETE, handleBrowserCodeDelete);
   ipcMain.handle(CH_BCODE_SET_ACTIVE, handleBrowserCodeSetActive);
+  ipcMain.handle(CH_ENGINE_PREFS_GET, handleEnginePreferencesGet);
+  ipcMain.handle(CH_ENGINE_PREFS_SAVE, handleEnginePreferencesSave);
   mainLogger.info('apiKeyIpc.register.ok');
 }

@@ -17,6 +17,7 @@ import { helpersPath, skillPath, skillMetaFromPath as resolveSkillMetaFromPath }
 import { get as getAdapter } from './registry';
 import { spawnCli } from './cliSpawn';
 import { registerResourceOwner, unregisterResourceOwner } from '../../resourceMonitor';
+import { loadEnginePreference } from '../../settings/enginePreferences';
 import type {
   EngineAdapter,
   EngineRunControl,
@@ -134,6 +135,7 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
   let providerId: string | undefined;
   let model: string | undefined;
   let cliAuthed = false;
+  const preference = loadEnginePreference(adapter.id);
   try {
     if (adapter.id === 'codex') {
       const k = await loadOpenAIKey();
@@ -147,6 +149,11 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
       // BrowserCode is configured exclusively through provider API keys in
       // Settings. Do not classify a saved provider key as CLI-managed OAuth.
       cliAuthed = false;
+    } else if (adapter.id === 'pi') {
+      // Pi owns a multi-provider credential store. Never inject or attribute
+      // the Desktop Anthropic key to it; the selected Pi model/provider
+      // resolves credentials inside the Pi runtime.
+      cliAuthed = (await adapter.probeAuthed()).authed;
     } else {
       const auth = await resolveAuth();
       if (auth?.type === 'apiKey') savedApiKey = auth.value;
@@ -155,6 +162,7 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
   } catch (err) {
     engineLogger.warn('engines.run.auth.resolveFailed', { error: (err as Error).message });
   }
+  if (adapter.id !== 'browsercode' && preference.model) model = preference.model;
   // Headline auth-path log — greppable: `session.auth.path`. Tells you
   // which of the three cases this session falls into:
   //   - 'apiKey'       → using saved API key (ANTHROPIC / OPENAI env var)
@@ -188,6 +196,8 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
     if (adapter.id === 'codex') {
       // Codex CLI does not expose Plus vs Pro locally; use a generic label.
       resolvedSubType = 'chatgpt';
+    } else if (adapter.id === 'pi') {
+      resolvedSubType = 'pi-provider';
     } else {
       try {
         resolvedSubType = await loadClaudeSubscriptionType();
@@ -229,6 +239,7 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
     savedApiKey,
     providerId,
     model,
+    leanMode: preference.leanMode,
     attachmentRefs,
   };
   const wrappedPrompt = adapter.wrapPrompt(spawnCtx);
@@ -245,6 +256,7 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
     attachmentCount: attachmentRefs.length,
     providerId,
     model,
+    leanMode: preference.leanMode,
     authSource: savedApiKey ? 'savedApiKey' : 'cliManaged',
     args: args.map((a) => (a.length > 120 ? `${a.slice(0, 100)}…<${a.length}ch>` : a)),
     envAuthFlags: {

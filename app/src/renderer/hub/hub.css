@@ -3962,6 +3962,74 @@ button:focus:not(:focus-visible) {
   color: var(--color-status-success, #4ade80);
 }
 
+.agent-engine-preferences {
+  margin-bottom: var(--space-4);
+}
+
+.agent-engine-preferences__row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.6fr) minmax(280px, 1.8fr) minmax(170px, 0.8fr);
+  align-items: end;
+  gap: var(--space-4);
+}
+
+.engine-logo--pi,
+.pane__engine-icon--pi {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: Georgia, serif;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.agent-engine-preferences__identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 34px;
+}
+
+.agent-engine-preferences__model {
+  width: 100%;
+  min-width: 0;
+}
+
+.agent-engine-preferences__external-model {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  color: var(--color-fg-disabled);
+  font-size: var(--font-size-xs);
+}
+
+.agent-engine-preferences__lean {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 34px;
+  color: var(--color-fg-primary);
+}
+
+.agent-engine-preferences__lean > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--font-size-xs);
+}
+
+.agent-engine-preferences__lean small {
+  color: var(--color-fg-disabled);
+}
+
+@media (max-width: 900px) {
+  .agent-engine-preferences__row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+}
+
 .conn-card__sub {
   display: flex;
   flex-direction: column;

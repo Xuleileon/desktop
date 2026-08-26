@@ -302,6 +302,18 @@ interface ElectronSettingsBrowserCodeAPI {
   setActive: (payload: { providerId: string }) => Promise<void>;
 }
 
+interface ElectronSettingsEnginePreferencesAPI {
+  get: () => Promise<Array<{
+    id: string;
+    displayName: string;
+    model: string;
+    leanMode: boolean;
+    models: Array<{ id: string; label: string }>;
+    modelConfigurable: boolean;
+  }>>;
+  save: (payload: { engineId: string; model: string; leanMode: boolean }) => Promise<void>;
+}
+
 interface ElectronSettingsAppAPI {
   getUpdateStatus: () => Promise<{
     status: 'idle' | 'checking' | 'downloading' | 'ready' | 'error' | 'unavailable';
@@ -356,6 +368,7 @@ interface ElectronSettingsAPI {
   openaiKey?: ElectronSettingsOpenAiKeyAPI;
   codex?: ElectronSettingsCodexAPI;
   browserCode?: ElectronSettingsBrowserCodeAPI;
+  enginePreferences?: ElectronSettingsEnginePreferencesAPI;
   app?: ElectronSettingsAppAPI;
 }
 
