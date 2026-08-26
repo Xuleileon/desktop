@@ -594,7 +594,10 @@ function SkillCard({ entry, variant }: { entry: OutputEntry; variant: 'used' | '
     }
     setLoading(true);
     try {
-      const isAbs = absPath.startsWith('/') && absPath.endsWith('.md');
+      // Renderer code cannot use node:path. Accept POSIX, UNC, and Windows
+      // drive-letter paths so a real C:\\...\\SKILL.md event is not discarded
+      // in favor of a potentially stale synthetic skill id.
+      const isAbs = /^(?:[A-Za-z]:[\\/]|[\\/]{2}|\/)/.test(absPath) && /\.md$/i.test(absPath);
       const res = await api({
         domainTopic,
         absPath: isAbs ? absPath : undefined,

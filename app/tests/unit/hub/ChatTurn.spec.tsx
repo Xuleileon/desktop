@@ -159,6 +159,46 @@ describe('ChatTurn', () => {
     act(() => root.unmount());
   });
 
+  it('passes a Windows SKILL.md path to readSkill instead of dropping it', async () => {
+    const windowsPath = 'C:\\Users\\tester\\AppData\\Roaming\\Browser Use\\harness\\skills\\general\\demo\\SKILL.md';
+    const readSkill = vi.fn().mockResolvedValue({
+      ok: true,
+      path: windowsPath,
+      filename: 'SKILL.md',
+      sizeBytes: 10,
+      mtimeMs: 1,
+      lineCount: 1,
+      title: 'Demo',
+      description: 'Demo skill',
+      body: '# Demo',
+      truncated: false,
+    });
+    Object.defineProperty(window, 'electronAPI', {
+      configurable: true,
+      value: { sessions: { readSkill } },
+    });
+    const turn: Turn = {
+      id: 'turn-skill',
+      userEntry: null,
+      agentEntries: [{
+        id: 'skill-1',
+        type: 'skill_used',
+        timestamp: 1000,
+        content: 'user/general/demo',
+        tool: windowsPath,
+      }],
+    };
+
+    const { root } = renderTurn(turn);
+    await act(async () => { await Promise.resolve(); });
+
+    expect(readSkill).toHaveBeenCalledWith({
+      domainTopic: 'user/general/demo',
+      absPath: windowsPath,
+    });
+    act(() => root.unmount());
+  });
+
   it('keeps trailing Pi thinking in the subdued reasoning style while streaming', () => {
     const turn: Turn = {
       id: 'turn-1',

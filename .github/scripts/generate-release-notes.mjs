@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 function env(name, fallback = '') {
   return process.env[name] || fallback;
@@ -52,6 +52,31 @@ async function generateGithubNotes(ownerRepo, tag, previousTag) {
     body: JSON.stringify(payload),
   });
   return response.body || '';
+}
+
+function changelogNotes(tag) {
+  const version = tag.replace(/^v/, '');
+  let changelog;
+  try {
+    changelog = readFileSync('CHANGELOG.md', 'utf8');
+  } catch {
+    return '';
+  }
+
+  const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const heading = new RegExp(`^## \\[${escapedVersion}\\](?:\\s+-\\s+.*)?$`, 'm');
+  const match = heading.exec(changelog);
+  if (!match) {
+    return '';
+  }
+
+  const sectionStart = match.index;
+  const remainder = changelog.slice(sectionStart + match[0].length);
+  const nextHeading = /^##\s+/m.exec(remainder);
+  const sectionEnd = nextHeading
+    ? sectionStart + match[0].length + nextHeading.index
+    : changelog.length;
+  return changelog.slice(sectionStart, sectionEnd).trim();
 }
 
 function hasChangeEntries(body) {
@@ -125,10 +150,14 @@ const tag = requireEnv('RELEASE_TAG');
 const previousTag = env('PREVIOUS_TAG');
 const outputPath = env('RELEASE_NOTES_PATH', 'release-notes.md');
 
-const githubNotes = await generateGithubNotes(ownerRepo, tag, previousTag);
-const notes = hasChangeEntries(githubNotes)
-  ? githubNotes
-  : await generateCompareNotes(ownerRepo, tag, previousTag);
+const notesFromChangelog = changelogNotes(tag);
+let notes = notesFromChangelog;
+if (!notes) {
+  const githubNotes = await generateGithubNotes(ownerRepo, tag, previousTag);
+  notes = hasChangeEntries(githubNotes)
+    ? githubNotes
+    : await generateCompareNotes(ownerRepo, tag, previousTag);
+}
 
 writeFileSync(outputPath, notes.endsWith('\n') ? notes : `${notes}\n`);
 console.log(`Wrote deterministic release notes to ${outputPath}`);

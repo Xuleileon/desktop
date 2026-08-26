@@ -202,6 +202,7 @@ describe('runEngine harness watcher', () => {
       "console.log(JSON.stringify({ type: 'shellView' }));",
       "console.log(JSON.stringify({ type: 'userValidate' }));",
       "console.log(JSON.stringify({ type: 'create' }));",
+      "console.log(JSON.stringify({ type: 'bareCreate' }));",
       "console.log(JSON.stringify({ type: 'delete' }));",
       "console.log(JSON.stringify({ type: 'done' }));",
     ].join('\n');
@@ -247,6 +248,16 @@ describe('runEngine harness watcher', () => {
           }],
         };
       }
+      if (event.type === 'bareCreate') {
+        return {
+          events: [{
+            type: 'tool_call',
+            name: 'Bash',
+            args: { command: 'agent-skill create feishu-bitable-read --description "Read Bitable"' },
+            iteration: 2,
+          }],
+        };
+      }
       if (event.type === 'delete') {
         return {
           events: [{
@@ -282,6 +293,12 @@ describe('runEngine harness watcher', () => {
       type: 'skill_written',
       domain: 'user',
       topic: 'workflow/crm-triage',
+      action: 'write',
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'skill_written',
+      domain: 'user',
+      topic: 'general/feishu-bitable-read',
       action: 'write',
     }));
     expect(events).toContainEqual(expect.objectContaining({

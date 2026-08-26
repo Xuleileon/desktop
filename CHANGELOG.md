@@ -4,6 +4,39 @@ All notable changes to the Agentic Browser project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.0.33] - 2026-08-27
+
+This release contains every change since the `0.0.32` version baseline (`43a2d99`).
+
+### Added
+
+- **Pi agent runtime and per-agent model preferences** (`ec2d87d`) — added the Pi engine adapter, installer integration, persisted model configuration, settings UI, and model routing for Pi, Claude Code, Codex, and Browser Code.
+- **Per-task model selection and stronger skill discovery** (`d218eb0`) — added a task-level model picker, carried the selected model through execution, and improved the bundled `agent-skill` search/create behavior and related tests.
+- **Simplified Chinese desktop localization** (`e22c3d6`) — localized the hub, settings, connections, commands, task controls, status text, tray behavior, and supporting interaction prompts.
+
+### Changed
+
+- **Faster packaged startup** (`18dedb7`) — cache packaged dependencies in Electron Forge so repeated launches do not rebuild or reinstall unchanged runtime dependencies.
+- **Agent settings integration** (`9af1248`) — unified model preferences with the existing connections/settings surface and refined the agent preference layout and IPC contracts.
+- **Safer Windows browser sessions** (`e22c3d6`, `efbf674`) — stabilized browser identity/profile selection, restored persisted session metadata, improved browser-pool recovery, and hardened session-to-renderer synchronization.
+- **Release notes are sourced from this changelog** — stable releases now publish the matching version section from `CHANGELOG.md`; automatic commit notes remain the fallback when no matching section exists.
+
+### Fixed
+
+- **Windows Skill paths and missing Skill files** — recognize drive-letter, UNC, and POSIX absolute Markdown paths; canonicalize bare user Skill IDs to `user/general/<skill>` so cards resolve the same `SKILL.md` path created by the CLI.
+- **Opening generated files on Windows** — verify the target first, then open its parent directory through an awaited API with real error reporting, avoiding Electron's false-success `showItemInFolder` behavior and native “Location is unavailable” dialogs.
+- **Pi media and chat rendering** (`9af1248`, `efbf674`) — repaired media-path handling, stream conversion, output cards, tool/error rendering, and transcript state for resumed or partially populated sessions.
+- **Empty browser preview** (`df6660d`) — do not render a browser preview until a real page is available.
+- **Browser session resilience** (`e22c3d6`, `efbf674`) — improved cleanup, identity recovery, persisted session fields, sidebar refreshes, and renderer updates when sessions change outside the current task.
+
+### Verification
+
+- Added regression coverage for Windows absolute Skill paths and canonical `user/general` Skill events; the Windows output-folder handler is covered by the production typecheck and package build.
+- Targeted regression suite: 12 passed, 1 skipped.
+- TypeScript typecheck passed.
+
+**Full source range:** `43a2d99..v0.0.33`
+
 ## [Unreleased]
 
 ### Track 1 — Agent wiring

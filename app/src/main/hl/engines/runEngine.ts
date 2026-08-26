@@ -7,7 +7,7 @@
  * spawn args, env, and NDJSON dialect behind this contract.
  */
 
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -319,6 +319,29 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
       return { ok: false, error: nodeErr.message };
     }
   };
+  const terminateRunTree = (): { ok: boolean; error?: string } => {
+    if (!child.pid || child.exitCode !== null || child.signalCode !== null) return { ok: true };
+    if (process.platform !== 'win32') return signalRun('SIGTERM');
+
+    // On Windows the adapter is commonly launched through cmd.exe. Killing
+    // only that wrapper leaves node.exe, its Bash tools, and the Bun REPL
+    // alive across app restarts. Terminate the one exact child tree so a
+    // session cannot keep a stale Harness runtime or browser target open.
+    const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? 'C:\\Windows';
+    const taskkill = path.join(systemRoot, 'System32', 'taskkill.exe');
+    const result = spawnSync(taskkill, ['/PID', String(child.pid), '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore',
+      timeout: 5_000,
+    });
+    if (result.error) return { ok: false, error: result.error.message };
+    // taskkill returns 128 when the process exited between our liveness check
+    // and the command. That is already the desired final state.
+    if (result.status !== 0 && result.status !== 128) {
+      return { ok: false, error: `taskkill exited with code ${result.status ?? 'unknown'}` };
+    }
+    return { ok: true };
+  };
   const control: EngineRunControl = {
     pid: child.pid,
     canSuspend: useProcessGroup,
@@ -356,7 +379,15 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
         signalRun('SIGCONT');
       }
       controlState = 'terminated';
-      signalRun('SIGTERM');
+      const result = terminateRunTree();
+      if (!result.ok) {
+        engineLogger.warn('engines.run.control.terminateFailed', {
+          engineId: adapter.id,
+          sessionId: opts.sessionId,
+          pid: child.pid,
+          error: result.error,
+        });
+      }
     },
   };
   opts.onRunControl?.(control);
@@ -562,11 +593,15 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
       const meta = skillMetaFromSkillId(id);
       return meta ? { kind: 'read', domain: meta.domain, topic: meta.topic } : null;
     }
+    const userTopic = id.replace(/^user\//, '');
     return {
       kind: 'write',
       action: verb === 'patch' ? 'patch' : verb === 'delete' ? 'delete' : 'write',
       domain: 'user',
-      topic: id.replace(/^user\//, ''),
+      // The agent-skill CLI stores a bare create id under user/general/<id>.
+      // Persist that canonical topic in the synthetic event so the renderer
+      // resolves the same SKILL.md that the CLI actually created.
+      topic: userTopic.includes('/') ? userTopic : `general/${userTopic}`,
     };
   }
 
@@ -668,16 +703,27 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
         for (const raw of result.events) {
           for (const out of postProcess(raw)) emit(out);
         }
-        if (parseCtx.currentModel && parseCtx.currentModel !== lastResolvedModel && opts.onModelResolved) {
-          lastResolvedModel = parseCtx.currentModel;
+        if (parseCtx.currentModel && opts.onModelResolved) {
+          // Pi reports only the model name (for example composer-2.5-fast)
+          // even when it was launched with a provider-qualified id such as
+          // cpa-zeabur-copy/composer-2.5-fast. Persist the qualified id: it is
+          // the value Pi needs to resume/rerun the same provider next time.
+          const durableModel = adapter.id === 'pi'
+            && model?.includes('/')
+            && !parseCtx.currentModel.includes('/')
+            ? model
+            : parseCtx.currentModel;
+          if (durableModel === lastResolvedModel) continue;
+          lastResolvedModel = durableModel;
           engineLogger.info('session.model.resolved', {
             sessionId: opts.sessionId,
             engineId: adapter.id,
-            model: parseCtx.currentModel,
+            model: durableModel,
+            reportedModel: parseCtx.currentModel,
             source: 'engine',
             providerId,
           });
-          try { opts.onModelResolved({ model: parseCtx.currentModel, source: 'engine' }); }
+          try { opts.onModelResolved({ model: durableModel, source: 'engine' }); }
           catch (err) { engineLogger.warn('engines.run.onModelResolved.threw', { source: 'engine', error: (err as Error).message }); }
         }
       } catch (err) {

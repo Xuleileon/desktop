@@ -1755,11 +1755,22 @@ app.whenReady().then(async () => {
       mainLogger.warn('main.sessions:reveal-output.missing', { path: resolvedPath });
       return { revealed: false, error: 'file no longer exists' };
     }
-    // Select the verified file itself. Opening only its parent directory on
-    // Windows proved racy and could leave Explorer showing a stale output
-    // folder after the agent refreshed its session directory.
-    shell.showItemInFolder(resolvedPath);
-    mainLogger.info('main.sessions:reveal-output', { path: resolvedPath, platform: process.platform });
+    if (process.platform === 'win32') {
+      // Electron's showItemInFolder is fire-and-forget on Windows: it can show
+      // a native "Location is unavailable" dialog while this handler still
+      // records success. Opening the already-verified parent directory has a
+      // real error result and is stable for Unicode skill/output filenames.
+      const parentDir = path.dirname(resolvedPath);
+      const err = await shell.openPath(parentDir);
+      if (err) {
+        mainLogger.warn('main.sessions:reveal-output.openParentFailed', { path: resolvedPath, parentDir, error: err });
+        throw new Error(err);
+      }
+      mainLogger.info('main.sessions:reveal-output', { path: resolvedPath, parentDir, platform: process.platform, mode: 'open-parent' });
+    } else {
+      shell.showItemInFolder(resolvedPath);
+      mainLogger.info('main.sessions:reveal-output', { path: resolvedPath, platform: process.platform, mode: 'select-file' });
+    }
     return { revealed: true };
   });
 
@@ -2110,6 +2121,20 @@ app.whenReady().then(async () => {
       ctrl.abort();
     }
     activeAgents.clear();
+    // HL engine runs are separate from the legacy activeAgents map above.
+    // Terminate their full process trees before the runtime files are touched
+    // by a restarted/upgraded app, otherwise Pi/Node/Bash/Bun can survive and
+    // keep an obsolete Browser Harness instance alive.
+    for (const [sessionId, active] of activeRunControls) {
+      mainLogger.info('main.beforeQuit.terminateEngineRun', {
+        sessionId,
+        runId: active.runId,
+        pid: active.control.pid,
+      });
+      active.control.terminate();
+    }
+    activeRunControls.clear();
+    activeRunIds.clear();
     browserPool.destroyAll(shellWindow ?? undefined);
     stopResourceMonitor();
     sessionManager.destroy();
