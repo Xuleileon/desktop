@@ -46,6 +46,7 @@ export const HlEventUserInputSchema = z.object({
   type: z.literal('user_input'),
   text: z.string(),
   attachmentTurnIndex: z.number().int().nonnegative().optional(),
+  externalRequestId: z.string().max(100).optional(),
 });
 
 export const HlEventSkillWrittenSchema = z.object({

@@ -82,6 +82,15 @@ describe('HlEventSchema', () => {
     expect(event.type).toBe('error');
   });
 
+  it('parses an externally correlated follow-up input', () => {
+    const event = HlEventSchema.parse({
+      type: 'user_input',
+      text: 'Continue with the same task',
+      externalRequestId: 'request-1',
+    });
+    expect(event).toMatchObject({ type: 'user_input', externalRequestId: 'request-1' });
+  });
+
   it('rejects unknown event type', () => {
     expect(() => HlEventSchema.parse({ type: 'unknown_type' })).toThrow();
   });

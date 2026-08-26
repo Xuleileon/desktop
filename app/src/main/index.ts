@@ -543,6 +543,7 @@ app.whenReady().then(async () => {
   type QueuedFollowUp = {
     prompt: string;
     attachments: ValidatedAttachment[];
+    externalRequestId?: string;
   };
   const queuedFollowUps = new Map<string, QueuedFollowUp[]>();
   const drainingQueuedFollowUps = new Set<string>();
@@ -935,14 +936,14 @@ app.whenReady().then(async () => {
     return false;
   };
 
-  function queueFollowUpAfterNextTool(id: string, prompt: string, attachments: ValidatedAttachment[]): { queued?: boolean; error?: string } {
+  function queueFollowUpAfterNextTool(id: string, prompt: string, attachments: ValidatedAttachment[], externalRequestId?: string): { queued?: boolean; error?: string } {
     const session = sessionManager.getSession(id);
     if (!session) return { error: 'Session not found' };
     if (session.status !== 'running' && session.status !== 'stuck' && session.status !== 'paused') {
       return { error: `Session ${id} is ${session.status}, expected running, stuck, or paused` };
     }
     const q = queuedFollowUps.get(id) ?? [];
-    q.push({ prompt, attachments });
+    q.push({ prompt, attachments, externalRequestId });
     queuedFollowUps.set(id, q);
     sessionManager.appendOutput(id, {
       type: 'notify',
@@ -1007,6 +1008,7 @@ app.whenReady().then(async () => {
     validatedPrompt: string,
     resumeAttachments: ValidatedAttachment[],
     source: 'resume' | 'queued-follow-up',
+    externalRequestId?: string,
   ): Promise<{ resumed?: boolean; error?: string }> {
     const currentSession = sessionManager.getSession(validatedId);
     if (!currentSession) return { error: 'Session not found' };
@@ -1059,7 +1061,10 @@ app.whenReady().then(async () => {
 
     const engineId = sessionManager.getSessionEngine(validatedId) ?? DEFAULT_ENGINE_ID;
     await stampConfiguredSessionModel(validatedId, engineId, source);
-    const abortController = sessionManager.resumeSession(validatedId, validatedPrompt, { attachmentTurnIndex });
+    const abortController = sessionManager.resumeSession(validatedId, validatedPrompt, {
+      attachmentTurnIndex,
+      externalRequestId,
+    });
     if (resumeAttachments.length > 0) {
       mainLogger.info('main.sessions:resume.attachments', { id: validatedId, count: resumeAttachments.length, source });
     }
@@ -1119,7 +1124,7 @@ app.whenReady().then(async () => {
         }
       }
 
-      const result = await resumeSessionWithAgent(id, next.prompt, next.attachments, 'queued-follow-up');
+      const result = await resumeSessionWithAgent(id, next.prompt, next.attachments, 'queued-follow-up', next.externalRequestId);
       if (result.error) {
         mainLogger.warn('main.sessions.followUpDrain.resumeFailed', { id, boundary, error: result.error });
         sessionManager.appendOutput(id, {
@@ -1245,6 +1250,15 @@ app.whenReady().then(async () => {
         return { id, started: false, engine: engineId, error };
       }
     },
+    followUpTask: async (payload) => {
+      const result = await handleSessionResume({
+        id: payload.id,
+        prompt: payload.prompt,
+        externalRequestId: payload.requestId,
+      });
+      if (result.error) throw new Error(result.error);
+      return { id: payload.id, requestId: payload.requestId, ...result };
+    },
   });
   app.once('before-quit', () => {
     void localTaskServer.close().catch((err) => {
@@ -1336,37 +1350,52 @@ app.whenReady().then(async () => {
     await startSessionWithAgent(validatedId);
   });
 
-  ipcMain.handle('sessions:resume', async (_event, payload: { id: string; prompt: string; attachments?: unknown }) => {
+  type SessionResumePayload = {
+    id: string;
+    prompt: string;
+    attachments?: unknown;
+    externalRequestId?: string;
+  };
+
+  async function handleSessionResume(payload: SessionResumePayload): Promise<{ resumed?: boolean; queued?: boolean; error?: string }> {
     const validatedId = assertString(payload?.id, 'id', 100);
     const validatedPrompt = assertString(payload?.prompt, 'prompt', 10000);
     const resumeAttachments = assertAttachments(payload?.attachments);
+    const externalRequestId = payload?.externalRequestId == null
+      ? undefined
+      : assertString(payload.externalRequestId, 'externalRequestId', 100);
     mainLogger.info('main.sessions:resume', {
       id: validatedId,
       promptLength: validatedPrompt.length,
       attachmentCount: resumeAttachments.length,
+      external: externalRequestId !== undefined,
       attachmentMeta: resumeAttachments.map((a) => ({ name: a.name, mime: a.mime, size: a.bytes.byteLength })),
     });
 
     const currentSession = sessionManager.getSession(validatedId);
     if (!currentSession) return { error: 'Session not found' };
     if (currentSession.status === 'running' || currentSession.status === 'stuck') {
-      return queueFollowUpAfterNextTool(validatedId, validatedPrompt, resumeAttachments);
+      return queueFollowUpAfterNextTool(validatedId, validatedPrompt, resumeAttachments, externalRequestId);
     }
     if (currentSession.status === 'paused') {
       const isPlainResume = validatedPrompt.trim() === 'Continue from where you left off.' && resumeAttachments.length === 0;
       if (activeRunControls.has(validatedId)) {
         if (!isPlainResume) {
-          const queued = queueFollowUpAfterNextTool(validatedId, validatedPrompt, resumeAttachments);
+          const queued = queueFollowUpAfterNextTool(validatedId, validatedPrompt, resumeAttachments, externalRequestId);
           if (queued.error) return queued;
         }
         return resumePausedRun(validatedId, 'resume');
       }
       if (sessionManager.getEngineSessionId(validatedId)) {
-        return resumeSessionWithAgent(validatedId, validatedPrompt, resumeAttachments, 'resume');
+        return resumeSessionWithAgent(validatedId, validatedPrompt, resumeAttachments, 'resume', externalRequestId);
       }
       return { error: 'Paused agent process is no longer available.' };
     }
-    return resumeSessionWithAgent(validatedId, validatedPrompt, resumeAttachments, 'resume');
+    return resumeSessionWithAgent(validatedId, validatedPrompt, resumeAttachments, 'resume', externalRequestId);
+  }
+
+  ipcMain.handle('sessions:resume', async (_event, payload: SessionResumePayload) => {
+    return handleSessionResume(payload);
   });
 
   ipcMain.handle('sessions:rerun', async (_event, payload: string | { id?: unknown; prompt?: unknown }) => {

@@ -10,9 +10,16 @@ export interface LocalTaskPayload {
   engine?: string;
 }
 
+export interface LocalFollowUpPayload {
+  id: string;
+  prompt: string;
+  requestId: string;
+}
+
 export interface LocalTaskServerOptions {
   userDataPath: string;
   submitTask: (payload: LocalTaskPayload) => Promise<Record<string, unknown>>;
+  followUpTask: (payload: LocalFollowUpPayload) => Promise<Record<string, unknown>>;
   log?: {
     info(msg: string, extra?: Record<string, unknown>): void;
     warn(msg: string, extra?: Record<string, unknown>): void;
@@ -95,6 +102,32 @@ function parsePayload(raw: string): LocalTaskPayload {
   };
 }
 
+function parseFollowUpPayload(raw: string, id: string): LocalFollowUpPayload {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('request body must be JSON');
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('request body must be an object');
+  }
+  const obj = parsed as { prompt?: unknown; requestId?: unknown };
+  if (!id || id.length > 100) {
+    throw new Error('task id must be a non-empty string up to 100 characters');
+  }
+  if (typeof obj.prompt !== 'string' || obj.prompt.trim().length === 0) {
+    throw new Error('prompt must be a non-empty string');
+  }
+  if (obj.prompt.length > 10000) {
+    throw new Error('prompt is too long');
+  }
+  if (typeof obj.requestId !== 'string' || obj.requestId.length === 0 || obj.requestId.length > 100) {
+    throw new Error('requestId must be a non-empty string up to 100 characters');
+  }
+  return { id, prompt: obj.prompt, requestId: obj.requestId };
+}
+
 function writeControlFile(controlPath: string, control: ControlFile): void {
   fs.mkdirSync(path.dirname(controlPath), { recursive: true });
   const tmp = `${controlPath}.${process.pid}.tmp`;
@@ -134,7 +167,10 @@ export async function createLocalTaskServer(opts: LocalTaskServerOptions): Promi
       return;
     }
 
-    if (url.pathname !== '/tasks' || req.method !== 'POST') {
+    const followUpMatch = /^\/tasks\/([^/]+)\/follow-ups$/.exec(url.pathname);
+    const isTaskSubmission = url.pathname === '/tasks' && req.method === 'POST';
+    const isFollowUp = followUpMatch !== null && req.method === 'POST';
+    if (!isTaskSubmission && !isFollowUp) {
       sendJson(res, 404, { error: 'not_found' });
       return;
     }
@@ -145,8 +181,10 @@ export async function createLocalTaskServer(opts: LocalTaskServerOptions): Promi
     }
 
     try {
-      const payload = parsePayload(await readBody(req));
-      const result = await opts.submitTask(payload);
+      const raw = await readBody(req);
+      const result = isTaskSubmission
+        ? await opts.submitTask(parsePayload(raw))
+        : await opts.followUpTask(parseFollowUpPayload(raw, decodeURIComponent(followUpMatch?.[1] ?? '')));
       sendJson(res, 200, { ok: true, ...result });
     } catch (err) {
       const message = (err as Error).message || 'local task submission failed';

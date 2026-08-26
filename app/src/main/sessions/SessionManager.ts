@@ -142,10 +142,13 @@ export class SessionManager extends EventEmitter {
     return this.on(event, listener as (...args: unknown[]) => void);
   }
 
-  private createUserInputEvent(text: string, attachmentTurnIndex?: number): UserInputEvent {
+  private createUserInputEvent(text: string, attachmentTurnIndex?: number, externalRequestId?: string): UserInputEvent {
     const event: UserInputEvent = { type: 'user_input', text };
     if (attachmentTurnIndex !== undefined) {
       event.attachmentTurnIndex = attachmentTurnIndex;
+    }
+    if (externalRequestId !== undefined) {
+      event.externalRequestId = externalRequestId;
     }
     return event;
   }
@@ -157,14 +160,14 @@ export class SessionManager extends EventEmitter {
   private appendUserInputToLog(
     id: string,
     text: string,
-    opts: { emit?: boolean; attachmentTurnIndex?: number } = {},
+    opts: { emit?: boolean; attachmentTurnIndex?: number; externalRequestId?: string } = {},
   ): UserInputEvent | null {
     const session = this.sessions.get(id);
     if (!session) {
       mainLogger.warn('SessionManager.appendUserInputToLog', { id, reason: 'not_found' });
       return null;
     }
-    const event = this.createUserInputEvent(text, opts.attachmentTurnIndex);
+    const event = this.createUserInputEvent(text, opts.attachmentTurnIndex, opts.externalRequestId);
     session.output.push(event);
     const seq = session.output.length - 1;
     this.db.appendEvent(id, seq, event);
@@ -490,7 +493,7 @@ export class SessionManager extends EventEmitter {
     this.emitEvent('session-completed', { ...session });
   }
 
-  resumeSession(id: string, prompt: string, opts: { attachmentTurnIndex?: number } = {}): AbortController {
+  resumeSession(id: string, prompt: string, opts: { attachmentTurnIndex?: number; externalRequestId?: string } = {}): AbortController {
     const session = this.sessions.get(id);
     if (!session) {
       throw new Error(`Session not found: ${id}`);
@@ -500,7 +503,10 @@ export class SessionManager extends EventEmitter {
     }
 
     this.hydrateOutput(id);
-    this.appendUserInputToLog(id, prompt, { attachmentTurnIndex: opts.attachmentTurnIndex });
+    this.appendUserInputToLog(id, prompt, {
+      attachmentTurnIndex: opts.attachmentTurnIndex,
+      externalRequestId: opts.externalRequestId,
+    });
 
     session.status = 'running';
     session.error = undefined;

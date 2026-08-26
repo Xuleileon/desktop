@@ -30,6 +30,7 @@ describe('localTaskServer', () => {
         seen.push(payload);
         return { id: 'session-1', started: true };
       },
+      followUpTask: async () => ({ resumed: true }),
     });
     handles.push(handle);
 
@@ -54,6 +55,7 @@ describe('localTaskServer', () => {
     const handle = await createLocalTaskServer({
       userDataPath: makeTempDir(),
       submitTask: async () => ({ id: 'should-not-run' }),
+      followUpTask: async () => ({ id: 'should-not-run' }),
     });
     handles.push(handle);
 
@@ -72,6 +74,7 @@ describe('localTaskServer', () => {
     const handle = await createLocalTaskServer({
       userDataPath,
       submitTask: async () => ({ id: 'session-1' }),
+      followUpTask: async () => ({ resumed: true }),
     });
     const controlPath = path.join(userDataPath, LOCAL_TASK_CONTROL_FILE);
     expect(fs.existsSync(controlPath)).toBe(true);
@@ -79,5 +82,36 @@ describe('localTaskServer', () => {
     await handle.close();
 
     expect(fs.existsSync(controlPath)).toBe(false);
+  });
+
+  it('accepts authorized follow-ups and preserves the external request id', async () => {
+    const seen: unknown[] = [];
+    const handle = await createLocalTaskServer({
+      userDataPath: makeTempDir(),
+      submitTask: async () => ({ id: 'session-1' }),
+      followUpTask: async (payload) => {
+        seen.push(payload);
+        return { id: payload.id, requestId: payload.requestId, queued: true };
+      },
+    });
+    handles.push(handle);
+
+    const res = await fetch(`${handle.url}/tasks/session-1/follow-ups`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${handle.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ prompt: 'continue the task', requestId: 'request-1' }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      ok: true,
+      id: 'session-1',
+      requestId: 'request-1',
+      queued: true,
+    });
+    expect(seen).toEqual([{ id: 'session-1', prompt: 'continue the task', requestId: 'request-1' }]);
   });
 });

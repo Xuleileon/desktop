@@ -210,7 +210,7 @@ describe('SessionManager persistence', () => {
     const id = manager.createSession('Open example.com');
 
     manager.dismissSession(id);
-    const abortController = manager.resumeSession(id, 'Continue from here');
+    const abortController = manager.resumeSession(id, 'Continue from here', { externalRequestId: 'request-1' });
     const session = manager.getSession(id);
     const row = mockState.stores.get(dbPath)?.rows.get(id);
 
@@ -220,7 +220,11 @@ describe('SessionManager persistence', () => {
     expect(session?.error).toBeUndefined();
     expect(session?.prompt).toBe('Open example.com');
     expect(session?.output[0]).toEqual({ type: 'user_input', text: 'Open example.com' });
-    expect(session?.output.at(-1)).toEqual({ type: 'user_input', text: 'Continue from here' });
+    expect(session?.output.at(-1)).toEqual({
+      type: 'user_input',
+      text: 'Continue from here',
+      externalRequestId: 'request-1',
+    });
 
     manager.destroy();
   });
