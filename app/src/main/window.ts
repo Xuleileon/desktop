@@ -80,6 +80,12 @@ export function createShellWindow(opts?: ShellWindowOptions): BrowserWindow {
   const incognito = opts?.incognito ?? false;
   mainLogger.info('window.createShellWindow', { bounds, titleSuffix, incognito });
 
+  const windowIcon = process.platform === 'win32'
+    ? (app.isPackaged
+        ? path.join(process.resourcesPath, 'icon.ico')
+        : path.resolve(process.cwd(), 'assets', 'icon.ico'))
+    : undefined;
+
   const win = new BrowserWindow({
     x: bounds.x,
     y: bounds.y,
@@ -87,6 +93,7 @@ export function createShellWindow(opts?: ShellWindowOptions): BrowserWindow {
     height: bounds.height,
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
+    ...(windowIcon ? { icon: windowIcon } : {}),
     titleBarStyle: 'hidden',
     trafficLightPosition: { x: 16, y: 16 },
     // Windows: `titleBarStyle: 'hidden'` removes the entire native title bar

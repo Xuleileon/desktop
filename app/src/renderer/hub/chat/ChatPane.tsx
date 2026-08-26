@@ -14,6 +14,7 @@ import claudeCodeLogo from '../claude-code-logo.svg';
 import openaiLogo from '../openai-logo.svg';
 import opencodeLogo from '../opencode-logo-light.svg';
 import './chat.css';
+import { useI18n } from '../i18n';
 
 interface ChatPaneProps {
   sessionId: string;
@@ -29,6 +30,7 @@ function formatCost(usd?: number): string {
 }
 
 export function ChatPane({ sessionId, onSwitchToBrowser, onExit }: ChatPaneProps): React.ReactElement {
+  const { tr, tx } = useI18n();
   // sessions.listAll (used at boot) returns metadata only — output[] is empty
   // until something triggers hydrateOutput in the main process. Call
   // sessions.get on mount so the transcript repaints from the DB instead of
@@ -291,7 +293,7 @@ export function ChatPane({ sessionId, onSwitchToBrowser, onExit }: ChatPaneProps
   if (!header) {
     return (
       <div className="chat-pane">
-        <div className="chat-empty">Session not found.</div>
+        <div className="chat-empty">{tr('Session not found.', '未找到会话。')}</div>
       </div>
     );
   }
@@ -326,7 +328,7 @@ export function ChatPane({ sessionId, onSwitchToBrowser, onExit }: ChatPaneProps
                   : 'Ran under saved API key'
               }
             >
-              {header.authMode === 'subscription' ? 'SUBSCRIPTION' : 'KEY'}
+              {header.authMode === 'subscription' ? tr('SUBSCRIPTION', '订阅') : tr('KEY', '密钥')}
             </span>
           )}
           {typeof header.costUsd === 'number' && header.costUsd > 0 && header.authMode !== 'subscription' && (
@@ -342,7 +344,7 @@ export function ChatPane({ sessionId, onSwitchToBrowser, onExit }: ChatPaneProps
               {formatCost(header.costUsd)}
             </span>
           )}
-          <span className={statusClass}>{STATUS_LABEL[header.status] ?? header.status}</span>
+          <span className={statusClass}>{tx(STATUS_LABEL[header.status] ?? header.status)}</span>
         </div>
       </div>
       <div className="chat-pane__column">

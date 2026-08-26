@@ -11,7 +11,17 @@ export function applyBrowserHarnessEnv(ctx: SpawnContext, env: NodeJS.ProcessEnv
   const agentSkillDir = path.join(ctx.harnessDir, 'agent-skill');
   const sdkDir = path.join(ctx.harnessDir, 'browser-harness-js', 'sdk');
   const harnessPath = `${agentSkillDir}${path.delimiter}${sdkDir}`;
-  env.PATH = env.PATH ? `${harnessPath}${path.delimiter}${env.PATH}` : harnessPath;
+  // Windows environment keys are case-insensitive, but Node's env object is
+  // not. GUI-launched Electron commonly receives `Path`, while older code
+  // added a second `PATH`. CreateProcess keeps only one of those duplicate
+  // keys, which could discard the enriched Windows PATH and leave Git Bash
+  // unable to find node. Mutate the existing canonical key instead.
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
+  const currentPath = env[pathKey];
+  env[pathKey] = currentPath ? `${harnessPath}${path.delimiter}${currentPath}` : harnessPath;
+  for (const key of Object.keys(env)) {
+    if (key !== pathKey && key.toLowerCase() === 'path') delete env[key];
+  }
   env.CDP_REPL_PORT = env.CDP_REPL_PORT ?? browserHarnessReplPort(ctx.sessionId, ctx.targetId);
   env.CDP_REPL_LOG = env.CDP_REPL_LOG ?? path.join(ctx.harnessDir, `browser-harness-js-${ctx.sessionId}.log`);
   env.BU_SESSION_ID = ctx.sessionId;

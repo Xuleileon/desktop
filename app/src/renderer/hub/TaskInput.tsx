@@ -11,6 +11,7 @@ import React, {
 import { INPUT_PLACEHOLDER } from './constants';
 import { EnginePicker, EngineLogo } from './EnginePicker';
 import { AttachmentList, type AttachmentItem } from './chat-v2/Attachments';
+import { useI18n } from './i18n';
 
 const ENGINE_DISPLAY_NAMES: Record<string, string> = {
   'claude-code': 'Claude Code',
@@ -91,6 +92,7 @@ async function readFileBytes(file: File): Promise<Uint8Array> {
 }
 
 export const TaskInput = forwardRef<TaskInputHandle, TaskInputProps>(function TaskInput({ onSubmit, topSlot, lockedEngine }, ref) {
+  const { tr } = useI18n();
   const [value, setValue] = useState('');
   const [focused, setFocused] = useState(false);
   const [attachments, setAttachments] = useState<TaskInputAttachment[]>([]);
@@ -281,17 +283,17 @@ export const TaskInput = forwardRef<TaskInputHandle, TaskInputProps>(function Ta
           onKeyDown={onKeyDown}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          placeholder={INPUT_PLACEHOLDER}
+          placeholder={tr(INPUT_PLACEHOLDER, '告诉 Agent 你想完成什么…')}
           rows={1}
-          aria-label="New agent task"
+          aria-label={tr('New agent task', '新建 Agent 任务')}
         />
         <div className="task-input__actions" onClick={focusTextareaOnBoxClick}>
           <button
             type="button"
             className="task-input__attach has-tooltip"
             onClick={() => fileInputRef.current?.click()}
-            aria-label="Attach files"
-            data-tooltip="Attach files"
+            aria-label={tr('Attach files', '添加附件')}
+            data-tooltip={tr('Attach files', '添加附件')}
           >
             <PaperclipIcon />
           </button>
@@ -323,8 +325,8 @@ export const TaskInput = forwardRef<TaskInputHandle, TaskInputProps>(function Ta
             className="task-input__send"
             onClick={submit}
             disabled={!canSubmit}
-            aria-label="Start agent"
-            title="Start agent (Enter)"
+            aria-label={tr('Start agent', '启动 Agent')}
+            title={tr('Start agent (Enter)', '启动 Agent（Enter）')}
           >
             <ArrowUpIcon />
           </button>

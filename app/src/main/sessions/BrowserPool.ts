@@ -601,6 +601,31 @@ export class BrowserPool {
     }
   }
 
+  /** The hub currently renders one live browser pane. Keep background
+   * screencast views parked, but remove any other full-size sibling before a
+   * session becomes visible. Otherwise two WebContentsViews occupy the same
+   * rectangle and Electron's child z-order can show a stale session. */
+  private detachVisibleSiblings(sessionId: string, window: BrowserWindow): void {
+    for (const entry of this.entries.values()) {
+      if (entry.sessionId === sessionId || !entry.attached || entry.parked) continue;
+      try { window.contentView.removeChildView(entry.view); } catch { /* already removed */ }
+      entry.attached = false;
+      this.applyFrameRate(entry);
+      this.scheduleIdleFreeze(entry, 'replaced-by-visible-session');
+      browserLogger.info('BrowserPool.detachVisibleSibling', {
+        sessionId: entry.sessionId,
+        replacedBy: sessionId,
+      });
+    }
+  }
+
+  private raiseChildView(window: BrowserWindow, view: WebContentsView): void {
+    if (window.contentView.children.includes(view)) {
+      try { window.contentView.removeChildView(view); } catch { /* already removed */ }
+    }
+    window.contentView.addChildView(view);
+  }
+
   private getPreviewParkBounds(window: BrowserWindow, width: number, height: number): ViewBounds {
     const fallback = { width: DEFAULT_BROWSER_WIDTH, height: DEFAULT_BROWSER_HEIGHT };
     const contentBounds = typeof window.getContentBounds === 'function'
@@ -655,10 +680,13 @@ export class BrowserPool {
     }
 
     const fitted = this.fitBoundsToView(bounds);
+    this.detachVisibleSiblings(sessionId, window);
 
     if (entry.attached) {
       browserLogger.debug('BrowserPool.attach.alreadyAttached', { sessionId });
-      this.ensureChildView(window, entry.view);
+      // Re-adding is intentional: addChildView raises the selected session
+      // above any parked/background sibling.
+      this.raiseChildView(window, entry.view);
       entry.view.setBounds({ x: fitted.x, y: fitted.y, width: fitted.width, height: fitted.height });
       try { entry.view.webContents.setZoomFactor(fitted.zoom); } catch { /* ignore */ }
       entry.parked = false;
@@ -669,7 +697,7 @@ export class BrowserPool {
     }
 
     entry.view.setBounds({ x: fitted.x, y: fitted.y, width: fitted.width, height: fitted.height });
-    this.ensureChildView(window, entry.view);
+    this.raiseChildView(window, entry.view);
     entry.attached = true;
     entry.parked = false;
     this.rememberVisibleBounds(entry, { x: fitted.x, y: fitted.y, width: fitted.width, height: fitted.height });

@@ -15,6 +15,7 @@ import { extractAll } from '../chat-v2/htmlBlocks';
 import { HtmlBlock } from '../chat-v2/HtmlBlock';
 import { OptionList } from '../chat-v2/OptionList';
 import { AskForm } from '../chat-v2/AskForm';
+import { useI18n } from '../i18n';
 
 const USER_BUBBLE_CLAMP_LINES = 10;
 const USER_BUBBLE_CLAMP_CHARS = 600;
@@ -561,6 +562,7 @@ type SkillMeta =
   | { ok: false; error: string };
 
 function SkillCard({ entry, variant }: { entry: OutputEntry; variant: 'used' | 'written' }): React.ReactElement {
+  const { tr } = useI18n();
   // `content` is shaped "domain/topic" (e.g. "user/fun/page-word-count").
   // For skill_used domain may be omitted; in that case the whole string is the topic.
   const raw = entry.content || '';
@@ -570,8 +572,8 @@ function SkillCard({ entry, variant }: { entry: OutputEntry; variant: 'used' | '
     : (raw ? `user/${raw}` : undefined);
   const action = entry.harnessAction;
   const label = variant === 'written'
-    ? (action === 'delete' ? 'Skill deleted' : action === 'patch' ? 'Skill updated' : 'Skill written')
-    : 'Skill used';
+    ? (action === 'delete' ? tr('Skill deleted', '已删除技能') : action === 'patch' ? tr('Skill updated', '已更新技能') : tr('Skill written', '已写入技能'))
+    : tr('Skill used', '已使用技能');
 
   const [expanded, setExpanded] = useState(false);
   const [meta, setMeta] = useState<SkillMeta | null>(null);
@@ -609,8 +611,8 @@ function SkillCard({ entry, variant }: { entry: OutputEntry; variant: 'used' | '
   }, []);
 
   const displayTitle = meta?.ok
-    ? (meta.title || meta.filename.replace(/\.md$/i, '') || 'Untitled skill')
-    : (meta == null || loading ? 'Loading skill...' : 'Skill unavailable');
+    ? (meta.title || meta.filename.replace(/\.md$/i, '') || tr('Untitled skill', '未命名技能'))
+    : (meta == null || loading ? tr('Loading skill...', '正在加载技能…') : tr('Skill unavailable', '技能不可用'));
 
   return (
     <div
@@ -622,7 +624,7 @@ function SkillCard({ entry, variant }: { entry: OutputEntry; variant: 'used' | '
         onClick={toggle}
         aria-expanded={expanded}
         aria-controls={`skill-body-${entry.id}`}
-        title={expanded ? 'Collapse' : 'Show details'}
+        title={expanded ? tr('Collapse', '收起') : tr('Show details', '查看详情')}
       >
         <span className="chat-skill-card__label">{label}</span>
         <span className="chat-skill-card__title">{displayTitle}</span>
@@ -630,28 +632,28 @@ function SkillCard({ entry, variant }: { entry: OutputEntry; variant: 'used' | '
       </button>
       {expanded && (
         <div id={`skill-body-${entry.id}`} className="chat-skill-card__body">
-          {loading && <div className="chat-skill-card__loading">Loading...</div>}
+          {loading && <div className="chat-skill-card__loading">{tr('Loading...', '加载中…')}</div>}
           {meta?.ok === false && (
-            <div className="chat-skill-card__error">Could not read this skill: {meta.error}</div>
+            <div className="chat-skill-card__error">{tr('Could not read this skill:', '无法读取此技能：')} {meta.error}</div>
           )}
           {meta?.ok === true && (
             <>
               <div className="chat-skill-card__desc">
-                {meta.description || <span className="chat-skill-card__desc-empty">No description.</span>}
+                {meta.description || <span className="chat-skill-card__desc-empty">{tr('No description.', '暂无描述。')}</span>}
               </div>
               <div className="chat-skill-card__actions">
                 <button
                   type="button"
                   className="chat-skill-card__btn chat-skill-card__btn--finder"
-                  aria-label={`Reveal ${displayTitle} in Finder`}
-                  title="Reveal in Finder"
+                  aria-label={tr(`Reveal ${displayTitle} in Finder`, `在资源管理器中显示 ${displayTitle}`)}
+                  title={tr('Reveal in Finder', '在资源管理器中显示')}
                   onClick={() => {
                     void window.electronAPI?.sessions?.revealOutput?.(meta.path)
                       .catch((err) => console.error('[SkillCard] revealOutput failed', err));
                   }}
                 >
                   <FinderIcon />
-                  <span>Reveal in Finder</span>
+                  <span>{tr('Reveal in Finder', '在资源管理器中显示')}</span>
                 </button>
               </div>
             </>

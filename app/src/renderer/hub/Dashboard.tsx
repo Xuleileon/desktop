@@ -9,6 +9,7 @@ import { TaskInput } from './TaskInput';
 import type { TaskInputHandle } from './TaskInput';
 import { DashboardBackground } from './DashboardBackground';
 import { useUIStore } from './state/uiStore';
+import { useI18n } from './i18n';
 import type { AgentSession } from './types';
 
 const HOUR = 3600 * 1000;
@@ -99,6 +100,7 @@ interface DashboardProps {
 }
 
 export function Dashboard({ sessions, onSubmitTask }: DashboardProps): React.ReactElement {
+  const { tr } = useI18n();
   const runningCount = sessions.filter((s) => s.status === 'running').length;
   const idleCount = sessions.filter((s) => s.status === 'idle').length;
 
@@ -184,12 +186,12 @@ export function Dashboard({ sessions, onSubmitTask }: DashboardProps): React.Rea
       <div className="dashboard__hero">
         <TaskInput ref={taskInputRef} onSubmit={onSubmitTask} />
       </div>
-      {isDragging && <div className="dashboard__drop-overlay" aria-label="Drop files to attach" />}
+      {isDragging && <div className="dashboard__drop-overlay" aria-label={tr('Drop files to attach', '拖放文件以添加附件')} />}
 
       <div className="dashboard__cards">
         <div className="dashboard__stat-card">
           <div className="dashboard__stat-card-head">
-            <span className="dashboard__stat-card-label">Running now</span>
+            <span className="dashboard__stat-card-label">{tr('Running now', '正在运行')}</span>
           </div>
           <span className="dashboard__stat-card-value">{runningCount}</span>
           <div className="dashboard__stat-card-spark">
@@ -199,7 +201,7 @@ export function Dashboard({ sessions, onSubmitTask }: DashboardProps): React.Rea
 
         <div className="dashboard__stat-card">
           <div className="dashboard__stat-card-head">
-            <span className="dashboard__stat-card-label">Idle</span>
+            <span className="dashboard__stat-card-label">{tr('Idle', '等待中')}</span>
           </div>
           <span className="dashboard__stat-card-value">{idleCount}</span>
           <div className="dashboard__stat-card-spark">
@@ -209,7 +211,7 @@ export function Dashboard({ sessions, onSubmitTask }: DashboardProps): React.Rea
 
         <div className="dashboard__stat-card">
           <div className="dashboard__stat-card-head">
-            <span className="dashboard__stat-card-label">Total sessions</span>
+            <span className="dashboard__stat-card-label">{tr('Total sessions', '会话总数')}</span>
           </div>
           <span className="dashboard__stat-card-value">{sessions.length}</span>
           <div className="dashboard__stat-card-spark">

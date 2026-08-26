@@ -42,9 +42,21 @@ describe('browser harness environment', () => {
     const env = applyBrowserHarnessEnv(spawnContext('target-a'), { PATH: '/usr/bin' });
 
     expect(env.PATH?.split(path.delimiter).slice(0, 3)).toEqual([
-      '/tmp/harness/agent-skill',
-      '/tmp/harness/browser-harness-js/sdk',
+      path.join('/tmp/harness', 'agent-skill'),
+      path.join('/tmp/harness', 'browser-harness-js', 'sdk'),
       '/usr/bin',
     ]);
+  });
+
+  it('preserves the canonical Windows Path key without creating a duplicate PATH', () => {
+    const env = applyBrowserHarnessEnv(spawnContext('target-a'), {
+      Path: 'C:\\Program Files\\nodejs;C:\\Windows\\System32',
+    });
+
+    expect(env.Path?.split(path.delimiter).slice(-2)).toEqual([
+      'C:\\Program Files\\nodejs',
+      'C:\\Windows\\System32',
+    ]);
+    expect(env.PATH).toBeUndefined();
   });
 });

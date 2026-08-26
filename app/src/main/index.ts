@@ -28,9 +28,6 @@ import {
 registerChatfilePrivileges();
 
 const appBrowserIdentity = buildBrowserIdentity();
-const FIREFOX_COMPAT_DISABLED_CHROMIUM_FEATURES = [
-  'UserAgentClientHint',
-] as const;
 const BROWSER_COMPAT_ENABLED_CHROMIUM_FEATURES = [
   'WebShare',
 ] as const;
@@ -45,7 +42,6 @@ function appendChromiumFeatures(switchName: string, features: readonly string[])
 
 app.userAgentFallback = appBrowserIdentity.userAgent;
 appendChromiumFeatures('disable-blink-features', ['AutomationControlled']);
-appendChromiumFeatures('disable-features', FIREFOX_COMPAT_DISABLED_CHROMIUM_FEATURES);
 appendChromiumFeatures('enable-features', BROWSER_COMPAT_ENABLED_CHROMIUM_FEATURES);
 
 if (process.platform === 'linux') {
@@ -292,7 +288,7 @@ function registerBrowserIdentityHeaders(): void {
   );
   mainLogger.info('main.browserIdentity.headersRegistered', {
     userAgent: identity.userAgent,
-    browser: 'Firefox',
+    browser: 'Chrome',
     platform: identity.platformLabel,
   });
 }
@@ -1738,8 +1734,24 @@ app.whenReady().then(async () => {
     if (!isOutputFile && !isSkillFile) {
       throw new Error('refused: path outside outputs or skills dir');
     }
-    shell.showItemInFolder(resolvedPath);
-    mainLogger.info('main.sessions:reveal-output', { path: resolvedPath });
+    if (!fs.existsSync(resolvedPath)) {
+      mainLogger.warn('main.sessions:reveal-output.missing', { path: resolvedPath });
+      return { revealed: false, error: 'file no longer exists' };
+    }
+    if (process.platform === 'win32') {
+      // Electron's showItemInFolder can ask Explorer to select a stale path
+      // while the harness tree is being refreshed, which surfaces a blocking
+      // "Location is not available" system dialog. Opening the verified parent
+      // directory is reliable on Windows and avoids blocking the agent UI.
+      const error = await shell.openPath(path.dirname(resolvedPath));
+      if (error) {
+        mainLogger.warn('main.sessions:reveal-output.failed', { path: resolvedPath, error });
+        return { revealed: false, error };
+      }
+    } else {
+      shell.showItemInFolder(resolvedPath);
+    }
+    mainLogger.info('main.sessions:reveal-output', { path: resolvedPath, platform: process.platform });
     return { revealed: true };
   });
 

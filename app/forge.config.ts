@@ -115,7 +115,9 @@ const config: ForgeConfig = {
     icon: 'assets/icon',   // Forge appends .icns on macOS automatically
     // electron-updater still reads process.resourcesPath/app-update.yml during
     // the download/install phase even when setFeedURL supplies the feed URL.
-    extraResource: ['app-update.yml'],
+    // The executable icon is embedded by Forge, but frameless BrowserWindows
+    // on Windows still need a runtime icon path for the taskbar/window switcher.
+    extraResource: ['app-update.yml', 'assets/icon.ico', 'assets/tray'],
   },
 
   rebuildConfig: {},

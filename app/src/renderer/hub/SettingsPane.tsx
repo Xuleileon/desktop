@@ -12,6 +12,7 @@ import {
   MAX_CYCLE_MS,
   type SpinnerPresetId,
 } from './chat/spinnerVerbs';
+import { useI18n, type AppLocale } from './i18n';
 
 /**
  * Generic settings primitives. Add a new option type and every section that
@@ -78,21 +79,26 @@ const APPEARANCE_OPTIONS: ReadonlyArray<SegmentedOption<ThemeMode>> = [
 
 function AppearanceSection(): React.ReactElement {
   const { mode, setMode, resolved } = useThemeMode();
+  const { tr } = useI18n();
   return (
     <div className="settings-card">
       <SettingsRow
-        label="Theme"
+        label={tr('Theme', '主题')}
         sublabel={
           mode === 'system'
-            ? `Following your system (${resolved}).`
-            : 'Choose how Browser Use looks across windows.'
+            ? tr(`Following your system (${resolved}).`, `跟随系统（${resolved === 'dark' ? '深色' : '浅色'}）。`)
+            : tr('Choose how Browser Use looks across windows.', '选择 Browser Use 在各窗口中的外观。')
         }
       >
         <SegmentedControl
           value={mode}
-          options={APPEARANCE_OPTIONS}
+          options={APPEARANCE_OPTIONS.map((option) => ({
+            ...option,
+            label: option.value === 'light' ? tr('Light', '浅色') : option.value === 'dark' ? tr('Dark', '深色') : tr('System', '跟随系统'),
+            hint: option.value === 'system' ? tr('Follow your operating system', '跟随操作系统设置') : option.hint,
+          }))}
           onChange={setMode}
-          ariaLabel="Theme"
+          ariaLabel={tr('Theme', '主题')}
         />
       </SettingsRow>
     </div>
@@ -100,6 +106,7 @@ function AppearanceSection(): React.ReactElement {
 }
 
 function SpinnerVerbsSection(): React.ReactElement {
+  const { tr } = useI18n();
   const presetId = useSpinnerVerbsStore((s) => s.presetId);
   const customVerbs = useSpinnerVerbsStore((s) => s.customVerbs);
   const cycleMs = useSpinnerVerbsStore((s) => s.cycleMs);
@@ -136,24 +143,24 @@ function SpinnerVerbsSection(): React.ReactElement {
   return (
     <div className="settings-card">
       <SettingsRow
-        label="Spinner verb"
-        sublabel="The word shown next to the busy spinner. Cycles through the list while the agent runs."
+        label={tr('Spinner verb', '运行提示词')}
+        sublabel={tr('The word shown next to the busy spinner. Cycles through the list while the agent runs.', 'Agent 运行时在加载图标旁循环显示的词语。')}
       >
         <select
           className="settings-pane__select"
           value={presetId}
           onChange={(e) => setPreset(e.target.value as SpinnerPresetId)}
-          aria-label="Spinner verb preset"
+          aria-label={tr('Spinner verb preset', '运行提示词预设')}
         >
           {presetOptions.map(([id, preset]) => (
             <option key={id} value={id}>{preset.label}</option>
           ))}
-          <option value="custom">Custom</option>
+          <option value="custom">{tr('Custom', '自定义')}</option>
         </select>
       </SettingsRow>
 
       <SettingsRow
-        label="Preview"
+        label={tr('Preview', '预览')}
         sublabel={presetId === 'custom'
           ? `${activePreview.length} custom verb${activePreview.length === 1 ? '' : 's'}.`
           : SPINNER_VERB_PRESETS[presetId].description}
@@ -165,8 +172,8 @@ function SpinnerVerbsSection(): React.ReactElement {
 
       {presetId === 'custom' && (
         <SettingsRow
-          label="Custom verbs"
-          sublabel={'One verb per line. Blank lines are ignored. Falls back to "Working" if empty.'}
+          label={tr('Custom verbs', '自定义提示词')}
+          sublabel={tr('One verb per line. Blank lines are ignored. Falls back to "Working" if empty.', '每行一个词，忽略空行；留空时使用 Working。')}
         >
           <textarea
             className="settings-pane__textarea"
@@ -182,8 +189,8 @@ function SpinnerVerbsSection(): React.ReactElement {
       )}
 
       <SettingsRow
-        label="Cycle interval"
-        sublabel={`How long each verb stays visible (${(cycleMs / 1000).toFixed(1)}s).`}
+        label={tr('Cycle interval', '切换间隔')}
+        sublabel={tr(`How long each verb stays visible (${(cycleMs / 1000).toFixed(1)}s).`, `每个提示词显示 ${(cycleMs / 1000).toFixed(1)} 秒。`)}
       >
         <input
           type="range"
@@ -192,7 +199,7 @@ function SpinnerVerbsSection(): React.ReactElement {
           step={100}
           value={cycleMs}
           onChange={(e) => setCycleMs(Number(e.target.value))}
-          aria-label="Spinner verb cycle interval"
+          aria-label={tr('Spinner verb cycle interval', '运行提示词切换间隔')}
           style={{ width: 200 }}
         />
       </SettingsRow>
@@ -245,6 +252,7 @@ type UpdateStatusEvent = {
 };
 
 function AppSection(): React.ReactElement {
+  const { locale, setLocale, tr } = useI18n();
   const [info, setInfo] = useState<Awaited<ReturnType<ElectronAppAPI['getInfo']>> | null>(null);
   const [updateStatusEvent, setUpdateStatusEvent] = useState<UpdateStatusEvent>({ status: 'idle' });
   const [checking, setChecking] = useState(false);
@@ -265,30 +273,30 @@ function AppSection(): React.ReactElement {
       : '0%';
   const updateStatus = updateStatusEvent.message ?? (
     !info
-      ? 'Checking latest version...'
+      ? tr('Checking latest version...', '正在检查最新版本…')
       : updateReady
-        ? 'Update is ready to install.'
+        ? tr('Update is ready to install.', '更新已准备好安装。')
         : updateBusy
-          ? 'Checking for updates...'
+          ? tr('Checking for updates...', '正在检查更新…')
           : onLatest
-            ? 'You are on the latest version.'
+            ? tr('You are on the latest version.', '当前已是最新版本。')
             : info.latestVersion
-              ? `Latest version is ${info.latestVersion}.`
+              ? tr(`Latest version is ${info.latestVersion}.`, `最新版本为 ${info.latestVersion}。`)
               : canDownloadUpdate
-                ? 'Checks on startup and every hour.'
-                : 'In-app updates are available in packaged release builds.'
+                ? tr('Checks on startup and every hour.', '启动时及每小时自动检查更新。')
+                : tr('In-app updates are available in packaged release builds.', '应用内更新仅在正式安装版中可用。')
   );
   const buttonLabel = !info || checking
-    ? 'Checking...'
+    ? tr('Checking...', '检查中…')
     : installing
-      ? 'Restarting...'
+      ? tr('Restarting...', '正在重启…')
       : updateReady
-        ? 'Restart to install'
+        ? tr('Restart to install', '重启并安装')
         : onLatest
-          ? 'On latest'
+          ? tr('On latest', '已是最新')
           : canDownloadUpdate
-            ? 'Download update'
-            : 'Unavailable';
+            ? tr('Download update', '下载更新')
+            : tr('Unavailable', '不可用');
 
   useEffect(() => {
     let cancelled = false;
@@ -356,18 +364,32 @@ function AppSection(): React.ReactElement {
 
   return (
     <div className="settings-card">
+      <SettingsRow
+        label={tr('Language', '语言')}
+        sublabel={tr('Choose the display language. Changes apply immediately.', '选择界面语言，修改后立即生效。')}
+      >
+        <SegmentedControl<AppLocale>
+          value={locale}
+          options={[
+            { value: 'zh-CN', label: '简体中文' },
+            { value: 'en-US', label: 'English' },
+          ]}
+          onChange={setLocale}
+          ariaLabel={tr('Language', '语言')}
+        />
+      </SettingsRow>
       <div className="settings-pane__row">
         <div>
-          <div className="settings-pane__label">Version</div>
+          <div className="settings-pane__label">{tr('Version', '版本')}</div>
           <div className="settings-pane__sublabel">
-            {info ? `Browser Use ${info.version}` : 'Detecting version...'}
+            {info ? `Browser Use ${info.version}` : tr('Detecting version...', '正在检测版本…')}
           </div>
         </div>
         {info && <span className="settings-pane__value">v{info.version}</span>}
       </div>
       <div className="settings-pane__row">
         <div>
-          <div className="settings-pane__label">Updates</div>
+          <div className="settings-pane__label">{tr('Updates', '更新')}</div>
           <div className="settings-pane__sublabel">
             {updateStatus}
           </div>
@@ -403,6 +425,7 @@ function readTabsPosition(): TabsPosition {
 }
 
 function LayoutSection(): React.ReactElement {
+  const { tr } = useI18n();
   const [position, setPosition] = useState<TabsPosition>(readTabsPosition);
 
   const choose = useCallback((next: TabsPosition) => {
@@ -416,12 +439,12 @@ function LayoutSection(): React.ReactElement {
   return (
     <div className="settings-card layout-section">
       <div className="layout-section__header">
-        <div className="settings-pane__label">Tab layout</div>
+        <div className="settings-pane__label">{tr('Tab layout', '标签页布局')}</div>
         <div className="settings-pane__sublabel">
-          Pick where the agent session tabs live. Top reclaims sidebar width for the browser viewport.
+          {tr('Pick where the agent session tabs live. Top reclaims sidebar width for the browser viewport.', '选择 Agent 会话标签的位置；顶部布局可为浏览器腾出更多宽度。')}
         </div>
       </div>
-      <div className="layout-picker" role="radiogroup" aria-label="Tab layout">
+      <div className="layout-picker" role="radiogroup" aria-label={tr('Tab layout', '标签页布局')}>
         <button
           type="button"
           role="radio"
@@ -439,8 +462,8 @@ function LayoutSection(): React.ReactElement {
             </div>
             <div className="layout-picker__mockup-viewport" />
           </div>
-          <div className="layout-picker__label">Side</div>
-          <div className="layout-picker__desc">Vertical sidebar on the left. Roomy session labels.</div>
+          <div className="layout-picker__label">{tr('Side', '侧边')}</div>
+          <div className="layout-picker__desc">{tr('Vertical sidebar on the left. Roomy session labels.', '左侧垂直栏，会话标题空间更充足。')}</div>
         </button>
         <button
           type="button"
@@ -459,8 +482,8 @@ function LayoutSection(): React.ReactElement {
             </div>
             <div className="layout-picker__mockup-viewport" />
           </div>
-          <div className="layout-picker__label">Top</div>
-          <div className="layout-picker__desc">Horizontal terminal-style strip. Wider browser viewport.</div>
+          <div className="layout-picker__label">{tr('Top', '顶部')}</div>
+          <div className="layout-picker__desc">{tr('Horizontal terminal-style strip. Wider browser viewport.', '顶部横向标签栏，浏览器视口更宽。')}</div>
         </button>
       </div>
     </div>
@@ -468,6 +491,7 @@ function LayoutSection(): React.ReactElement {
 }
 
 function PrivacySection(): React.ReactElement {
+  const { tr } = useI18n();
   const [telemetry, setTelemetry] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
   const api = (window as unknown as { electronAPI: { settings: { privacy: ElectronPrivacyAPI } } }).electronAPI.settings.privacy;
@@ -509,8 +533,8 @@ function PrivacySection(): React.ReactElement {
     <div className="settings-card">
       <div className="settings-pane__row">
         <div>
-          <div className="settings-pane__label">Allow telemetry to help us make this app better</div>
-          <div className="settings-pane__sublabel">Anonymous only — app version, OS, feature usage, and crash reports.</div>
+          <div className="settings-pane__label">{tr('Allow telemetry to help us make this app better', '允许匿名遥测以帮助改进应用')}</div>
+          <div className="settings-pane__sublabel">{tr('Anonymous only — app version, OS, feature usage, and crash reports.', '仅包含匿名信息：应用版本、操作系统、功能使用情况和崩溃报告。')}</div>
         </div>
         <button
           className="settings-pane__toggle"
@@ -526,8 +550,8 @@ function PrivacySection(): React.ReactElement {
 
       <div className="settings-pane__row">
         <div>
-          <div className="settings-pane__label">System notifications</div>
-          <div className="settings-pane__sublabel">Managed by your operating system.</div>
+          <div className="settings-pane__label">{tr('System notifications', '系统通知')}</div>
+          <div className="settings-pane__sublabel">{tr('Managed by your operating system.', '由操作系统管理。')}</div>
         </div>
         <button
           className="conn-card__btn conn-card__btn--secondary"
@@ -585,6 +609,7 @@ interface KeybindRowProps {
 }
 
 function KeybindRow({ kb, isOverridden, onUpdate, onReset, platform, formatShortcut }: KeybindRowProps): React.ReactElement {
+  const { tr, tx } = useI18n();
   const [recording, setRecording] = useState(false);
   const [firstKey, setFirstKey] = useState<string | null>(null);
   const [recordingError, setRecordingError] = useState<string | null>(null);
@@ -595,8 +620,8 @@ function KeybindRow({ kb, isOverridden, onUpdate, onReset, platform, formatShort
     setFirstKey(null);
     (document.activeElement as HTMLElement | null)?.blur?.();
     const ok = await onUpdate(kb.id, keys);
-    setRecordingError(ok ? null : 'That shortcut is unavailable. Choose another one.');
-  }, [kb.id, onUpdate]);
+    setRecordingError(ok ? null : tr('That shortcut is unavailable. Choose another one.', '该快捷键不可用，请选择其他组合。'));
+  }, [kb.id, onUpdate, tr]);
 
   useEffect(() => {
     if (!recording) return;
@@ -605,7 +630,7 @@ function KeybindRow({ kb, isOverridden, onUpdate, onReset, platform, formatShort
         void finishRecording([firstKey]);
       } else {
         setRecording(false);
-        setRecordingError('No shortcut was detected. Choose another combination.');
+        setRecordingError(tr('No shortcut was detected. Choose another combination.', '未检测到快捷键，请选择其他组合。'));
       }
     }, firstKey ? 700 : 8000);
 
@@ -624,7 +649,7 @@ function KeybindRow({ kb, isOverridden, onUpdate, onReset, platform, formatShort
         clearTimeout(timer);
         setRecording(false);
         setFirstKey(null);
-        setRecordingError('That shortcut is unavailable. Choose another one.');
+        setRecordingError(tr('That shortcut is unavailable. Choose another one.', '该快捷键不可用，请选择其他组合。'));
         return;
       }
 
@@ -654,13 +679,13 @@ function KeybindRow({ kb, isOverridden, onUpdate, onReset, platform, formatShort
       clearTimeout(timer);
       window.removeEventListener('keydown', handler, true);
     };
-  }, [finishRecording, firstKey, isGlobalShortcut, platform, recording]);
+  }, [finishRecording, firstKey, isGlobalShortcut, platform, recording, tr]);
 
   return (
     <div className={`settings-pane__row${isOverridden ? ' settings-pane__row--modified' : ''}`}>
       <div className="settings-pane__label-block">
-        <span className="settings-pane__label">{kb.label}</span>
-        <span className="settings-pane__sublabel">{kb.category}</span>
+        <span className="settings-pane__label">{tx(kb.label)}</span>
+        <span className="settings-pane__sublabel">{tx(kb.category)}</span>
       </div>
       <div className="settings-pane__row-right">
         <button
@@ -673,7 +698,7 @@ function KeybindRow({ kb, isOverridden, onUpdate, onReset, platform, formatShort
         >
           {recording ? (
             <span className="settings-pane__recording">
-              {firstKey ? `${formatShortcut(firstKey)} + ...` : 'Press key...'}
+              {firstKey ? `${formatShortcut(firstKey)} + ...` : tr('Press key...', '请按键…')}
             </span>
           ) : (
             kb.keys.map((k, i) => (
@@ -684,7 +709,7 @@ function KeybindRow({ kb, isOverridden, onUpdate, onReset, platform, formatShort
         <button
           className="settings-pane__reset-btn"
           onClick={() => onReset(kb.id)}
-          title="Reset to default"
+          title={tr('Reset to default', '恢复默认')}
           style={{ visibility: isOverridden && !recording ? 'visible' : 'hidden' }}
         >
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -699,6 +724,7 @@ function KeybindRow({ kb, isOverridden, onUpdate, onReset, platform, formatShort
 }
 
 export function SettingsPane({ intent, keybindings, overrides, onUpdateBinding, onResetBinding, onResetAll, formatShortcut }: SettingsPaneProps): React.ReactElement {
+  const { tr } = useI18n();
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [activeSection, setActiveSection] = useState<SettingsSectionId>('settings-application');
   const platform = window.electronAPI?.shell?.platform ?? fallbackShortcutPlatform();
@@ -751,11 +777,11 @@ export function SettingsPane({ intent, keybindings, overrides, onUpdateBinding, 
           <header className="settings-page__header">
             <div>
               <span className="settings-page__eyebrow">Browser Use</span>
-              <h1 className="settings-page__title">Settings</h1>
+              <h1 className="settings-page__title">{tr('Settings', '设置')}</h1>
             </div>
           </header>
 
-          <nav className="settings-page__tabs" aria-label="Settings sections">
+          <nav className="settings-page__tabs" aria-label={tr('Settings sections', '设置分类')}>
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -764,14 +790,20 @@ export function SettingsPane({ intent, keybindings, overrides, onUpdateBinding, 
                 onClick={() => scrollToSection(tab.id)}
                 data-settings-tab={tab.id}
               >
-                {tab.label}
+                {tab.id === 'settings-application' ? tr(tab.label, '应用')
+                  : tab.id === 'settings-appearance' ? tr(tab.label, '外观')
+                    : tab.id === 'settings-model-providers' ? tr(tab.label, '模型提供商')
+                      : tab.id === 'settings-connections' ? tr(tab.label, '连接')
+                        : tab.id === 'settings-browser-sync' ? tr(tab.label, '浏览器同步')
+                          : tab.id === 'settings-shortcuts' ? tr(tab.label, '快捷键')
+                            : tr(tab.label, '隐私')}
               </button>
             ))}
           </nav>
 
           <section id="settings-application" className="settings-page__section">
             <div className="settings-section-header">
-              <h2 className="settings-section-header__title">Application</h2>
+              <h2 className="settings-section-header__title">{tr('Application', '应用')}</h2>
             </div>
             <AppSection />
             <LayoutSection />
@@ -779,7 +811,7 @@ export function SettingsPane({ intent, keybindings, overrides, onUpdateBinding, 
 
           <section id="settings-appearance" className="settings-page__section">
             <div className="settings-section-header">
-              <h2 className="settings-section-header__title">Appearance</h2>
+              <h2 className="settings-section-header__title">{tr('Appearance', '外观')}</h2>
             </div>
             <AppearanceSection />
             <SpinnerVerbsSection />
@@ -795,9 +827,9 @@ export function SettingsPane({ intent, keybindings, overrides, onUpdateBinding, 
 
           <section id="settings-shortcuts" className="settings-page__section">
             <div className="settings-section-header">
-              <h2 className="settings-section-header__title">Shortcuts</h2>
+              <h2 className="settings-section-header__title">{tr('Shortcuts', '快捷键')}</h2>
               {Object.keys(overrides).length > 0 && (
-                <button className="settings-pane__reset-all" onClick={onResetAll}>Reset all</button>
+                <button className="settings-pane__reset-all" onClick={onResetAll}>{tr('Reset all', '全部重置')}</button>
               )}
             </div>
             <div className="settings-card settings-card--shortcuts">
@@ -817,7 +849,7 @@ export function SettingsPane({ intent, keybindings, overrides, onUpdateBinding, 
 
           <section id="settings-privacy" className="settings-page__section settings-page__section--last">
             <div className="settings-section-header">
-              <h2 className="settings-section-header__title">Privacy</h2>
+              <h2 className="settings-section-header__title">{tr('Privacy', '隐私')}</h2>
             </div>
             <PrivacySection />
           </section>

@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import type { AgentSession, SessionStatus } from './types';
 import { orderSessionsForSidebar } from './sessionOrdering';
 import { closeAppPopup, openAnchoredAppPopup } from '../shared/appPopup';
+import { useI18n } from './i18n';
 
 interface SidebarSession extends AgentSession {
   primarySite?: string | null;
@@ -172,6 +173,7 @@ function SessionRow({
   onSelect?: (id: string) => void;
   onAction?: (id: string, action: SidebarRowAction) => void;
 }): React.ReactElement {
+  const { tr } = useI18n();
   const dot = STATUS_DOT[s.status];
   const favicon = faviconUrl(s.primarySite);
   const last = s.lastActivityAt ?? s.createdAt;
@@ -197,10 +199,10 @@ function SessionRow({
         placement: 'bottom-end',
         width: 148,
         items: [
-          { id: 'rerun', label: 'Re-run' },
-          ...(isPaused ? [{ id: 'resume', label: 'Resume' }] : []),
-          ...(isRunning ? [{ id: 'pause', label: 'Pause' }] : []),
-          ...((isRunning || isPaused) ? [{ id: 'stop', label: 'Stop', tone: 'danger' as const }] : []),
+          { id: 'rerun', label: tr('Re-run', '重新运行') },
+          ...(isPaused ? [{ id: 'resume', label: tr('Resume', '继续') }] : []),
+          ...(isRunning ? [{ id: 'pause', label: tr('Pause', '暂停') }] : []),
+          ...((isRunning || isPaused) ? [{ id: 'stop', label: tr('Stop', '停止'), tone: 'danger' as const }] : []),
         ],
       },
       {
@@ -250,7 +252,7 @@ function SessionRow({
             void toggleMenu();
           }}
           tabIndex={-1}
-          aria-label="Session actions"
+          aria-label={tr('Session actions', '会话操作')}
           aria-haspopup="menu"
           aria-expanded={Boolean(popupId)}
         >
@@ -310,13 +312,14 @@ function TabChip({
 }
 
 export function Sidebar({ sessions, selectedId, onSelect, onNewAgent, onNewChat, onSearch, onRowAction, mode = 'side' }: SidebarProps): React.ReactElement {
+  const { tr } = useI18n();
   const data = sessions ?? MOCK_SIDEBAR_SESSIONS;
 
   const orderedSessions = useMemo(() => orderSessionsForSidebar(data), [data]);
 
   if (mode === 'top') {
     return (
-      <nav className="tabstrip" aria-label="Agent sessions">
+      <nav className="tabstrip" aria-label={tr('Agent sessions', 'Agent 会话')}>
         <div className="tabstrip__chips">
           {orderedSessions.map((s) => (
             <TabChip key={s.id} s={s} selected={s.id === selectedId} onSelect={onSelect} />
@@ -328,8 +331,8 @@ export function Sidebar({ sessions, selectedId, onSelect, onNewAgent, onNewChat,
           onClick={onNewAgent}
           onMouseDown={preventMouseFocus}
           tabIndex={-1}
-          aria-label="New agent"
-          data-tooltip="New agent"
+          aria-label={tr('New agent', '新建 Agent')}
+          data-tooltip={tr('New agent', '新建 Agent')}
         >
           <PlusIcon />
         </button>
@@ -338,7 +341,7 @@ export function Sidebar({ sessions, selectedId, onSelect, onNewAgent, onNewChat,
   }
 
   return (
-    <aside className="sidebar" aria-label="Agent sessions">
+    <aside className="sidebar" aria-label={tr('Agent sessions', 'Agent 会话')}>
       <div className="sidebar__quick">
         {onNewChat && (
           <button
@@ -349,7 +352,7 @@ export function Sidebar({ sessions, selectedId, onSelect, onNewAgent, onNewChat,
             tabIndex={-1}
           >
             <span className="sidebar__quick-icon"><ChatIcon /></span>
-            <span className="sidebar__quick-label">New chat</span>
+            <span className="sidebar__quick-label">{tr('New chat', '新建对话')}</span>
           </button>
         )}
         {onSearch && (
@@ -361,7 +364,7 @@ export function Sidebar({ sessions, selectedId, onSelect, onNewAgent, onNewChat,
             tabIndex={-1}
           >
             <span className="sidebar__quick-icon"><SearchIcon /></span>
-            <span className="sidebar__quick-label">Search</span>
+            <span className="sidebar__quick-label">{tr('Search', '搜索')}</span>
           </button>
         )}
       </div>
@@ -369,7 +372,7 @@ export function Sidebar({ sessions, selectedId, onSelect, onNewAgent, onNewChat,
       <div className="sidebar__groups">
         <div className="sidebar__group">
           <div className="sidebar__group-header sidebar__group-header--static">
-            <span className="sidebar__group-label">Agents</span>
+            <span className="sidebar__group-label">{tr('Agents', '智能体')}</span>
             {onNewAgent && (
               <button
                 type="button"
@@ -377,8 +380,8 @@ export function Sidebar({ sessions, selectedId, onSelect, onNewAgent, onNewChat,
                 onClick={onNewAgent}
                 onMouseDown={preventMouseFocus}
                 tabIndex={-1}
-                aria-label="New agent"
-                data-tooltip="New agent"
+                aria-label={tr('New agent', '新建 Agent')}
+                data-tooltip={tr('New agent', '新建 Agent')}
               >
                 <PlusIcon />
               </button>

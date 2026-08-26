@@ -20,7 +20,9 @@ export function refreshTrayMenu(): void {
 }
 
 function trayAssetDir(): string {
-  return path.resolve(app.getAppPath(), 'assets', 'tray');
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'tray')
+    : path.resolve(app.getAppPath(), 'assets', 'tray');
 }
 
 function getTrayIcon(): Electron.NativeImage {

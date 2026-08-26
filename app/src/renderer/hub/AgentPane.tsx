@@ -11,6 +11,7 @@ import opencodeLogoLight from './opencode-logo-light.svg';
 import { useThemedAsset } from '../design/useThemedAsset';
 import { closeAppPopup, openAnchoredAppPopup } from '../shared/appPopup';
 import type { AgentSession, OutputEntry } from './types';
+import { useI18n } from './i18n';
 
 function formatElapsed(createdAt: number): string {
   const seconds = Math.floor((Date.now() - createdAt) / 1000);
@@ -544,6 +545,7 @@ function insertAtCaret(el: HTMLTextAreaElement, text: string): string {
 }
 
 function FollowUpInput({ sessionId, onUserInput, autoFocus }: { sessionId: string; onUserInput: (text: string, attachments?: FollowUpAttachment[]) => void; autoFocus?: boolean }): React.ReactElement {
+  const { tr } = useI18n();
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<FollowUpAttachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
@@ -657,15 +659,15 @@ function FollowUpInput({ sessionId, onUserInput, autoFocus }: { sessionId: strin
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          placeholder="Follow up..."
+          placeholder={tr('Follow up...', '继续补充…')}
           rows={1}
         />
         <button
           type="button"
           className="followup__attach-btn"
           onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-          aria-label="Attach files"
-          title="Attach files"
+          aria-label={tr('Attach files', '添加附件')}
+          title={tr('Attach files', '添加附件')}
         >+</button>
         <input
           ref={fileInputRef}
@@ -706,6 +708,7 @@ interface AgentPaneProps {
 }
 
 export function AgentPane({ session, focused, onRerun, onResume, onPause, onFollowUp, onDismiss, onCancel, onSelect, onOpenFollowUp, onOpenSettings, onOpenChat, shouldDetachBrowserOnUnmount, followUpShortcut, cycleShortcut }: AgentPaneProps): React.ReactElement {
+  const { tr } = useI18n();
   const openaiLogo = useThemedAsset(openaiLogoDark, openaiLogoLight);
   const opencodeLogo = useThemedAsset(opencodeLogoDark, opencodeLogoLight);
   const paneRef = useRef<HTMLDivElement>(null);
@@ -962,7 +965,9 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
   }, [session.id, session.status]);
 
   const elapsed = formatElapsed(session.createdAt);
-  const statusText = STATUS_LABEL[session.status] ?? session.status;
+  const statusText = tr(STATUS_LABEL[session.status] ?? session.status, {
+    running: '运行中', idle: '等待输入', stuck: '遇到问题', paused: '已暂停', stopped: '已停止', draft: '准备中',
+  }[session.status] ?? session.status);
   const isCancellation = !!session.error && session.error.toLowerCase().includes('cancel');
   const showErrorUi = !!session.error && !isCancellation;
   const hasLiveBrowser = session.hasBrowser && !browserDead && !browserMissing;
@@ -1037,7 +1042,7 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
                   : 'Ran under saved API key'
               }
             >
-              {session.authMode === 'subscription' ? 'SUBSCRIPTION' : 'KEY'}
+              {session.authMode === 'subscription' ? tr('SUBSCRIPTION', '订阅') : tr('KEY', '密钥')}
             </span>
           )}
           {/* Cost chip is hidden under subscription auth (Claude Code / Codex
@@ -1062,37 +1067,37 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
           {browserDead && (
             <span className="pane__action-btn pane__action-btn--disabled">
               <BrowserIcon />
-              <span>Browser ended</span>
+              <span>{tr('Browser ended', '浏览器已结束')}</span>
             </span>
           )}
           {onOpenChat && (
             <button
               className="pane__action-btn"
               onClick={(e) => { e.stopPropagation(); onOpenChat(session.id); }}
-              aria-label="Back to chat view"
-              data-tip="Back to chat view"
+              aria-label={tr('Back to chat view', '返回对话视图')}
+              data-tip={tr('Back to chat view', '返回对话视图')}
             >
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                 <path d="M7 3L4 6l3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              <span>Back to chat</span>
+              <span>{tr('Back to chat', '返回对话')}</span>
             </button>
           )}
           <button
             className={`pane__action-btn${logsOpen ? ' pane__action-btn--active' : ''}`}
             onClick={(e) => { e.stopPropagation(); handleToggleLogs(); }}
-            aria-label="Toggle logs overlay"
-            data-tip="Toggle logs overlay"
+            aria-label={tr('Toggle logs overlay', '显示或隐藏日志')}
+            data-tip={tr('Toggle logs overlay', '显示或隐藏日志')}
           >
             <SplitIcon />
-            <span>Logs</span>
+            <span>{tr('Logs', '日志')}</span>
           </button>
           {onRerun && (
             <button
               className="pane__action-btn pane__action-btn--icon"
               onClick={(e) => { e.stopPropagation(); onRerun(session.id); }}
-              aria-label="Rerun"
-              data-tip="Rerun"
+              aria-label={tr('Rerun', '重新运行')}
+              data-tip={tr('Rerun', '重新运行')}
             >
               <RerunIcon />
             </button>
@@ -1101,8 +1106,8 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
             <button
               className="pane__action-btn pane__action-btn--icon pane__action-btn--primary"
               onClick={(e) => { e.stopPropagation(); onResume?.(session.id); }}
-              aria-label="Resume"
-              data-tip="Resume"
+              aria-label={tr('Resume', '继续')}
+              data-tip={tr('Resume', '继续')}
             >
               <ResumeIcon />
             </button>
@@ -1111,8 +1116,8 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
             <button
               className="pane__action-btn pane__action-btn--icon"
               onClick={(e) => { e.stopPropagation(); onPause(session.id); }}
-              aria-label="Pause"
-              data-tip="Pause"
+              aria-label={tr('Pause', '暂停')}
+              data-tip={tr('Pause', '暂停')}
             >
               <PauseIcon />
             </button>
@@ -1121,8 +1126,8 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
             <button
               className="pane__action-btn pane__action-btn--icon pane__action-btn--danger"
               onClick={(e) => { e.stopPropagation(); onCancel(session.id); }}
-              aria-label="Stop"
-              data-tip="Stop"
+              aria-label={tr('Stop', '停止')}
+              data-tip={tr('Stop', '停止')}
             >
               <CloseIcon />
             </button>
@@ -1131,8 +1136,8 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
             <button
               className="pane__action-btn pane__action-btn--icon pane__action-btn--danger"
               onClick={(e) => { e.stopPropagation(); onDismiss(session.id); }}
-              aria-label="Close"
-              data-tip="Close"
+              aria-label={tr('Close', '关闭')}
+              data-tip={tr('Close', '关闭')}
             >
               <CloseIcon />
             </button>
@@ -1158,14 +1163,14 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
       {frameRect && (showErrorUi || browserDead || browserMissing || session.status === 'draft' || endedWithoutBrowser) && (() => {
         const isStarting = !showErrorUi && !browserDead && !browserMissing && session.status === 'draft';
         const browserLine = browserDead
-          ? 'Browser ended'
+          ? tr('Browser ended', '浏览器已结束')
           : browserMissing
-            ? (session.status === 'stopped' || session.status === 'idle' || session.status === 'stuck' ? 'Browser stopped' : 'No browser started yet')
-            : (endedWithoutBrowser ? 'Browser ended' : null);
+            ? (session.status === 'stopped' || session.status === 'idle' || session.status === 'stuck' ? tr('Browser stopped', '浏览器已停止') : tr('No browser started yet', '浏览器尚未启动'))
+            : (endedWithoutBrowser ? tr('Browser ended', '浏览器已结束') : null);
         const primaryLine = showErrorUi
           ? friendlyError(session.error!)
           : isCancellation
-            ? 'Task was cancelled.'
+            ? tr('Task was cancelled.', '任务已取消。')
             : browserLine;
         const subLine = (showErrorUi || isCancellation) ? browserLine : null;
         const showActions = !isStarting && (onRerun || canResume || (showErrorUi && isApiKeyError(session.error) && onOpenSettings));
@@ -1189,7 +1194,7 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
                 {isStarting ? (
                   <>
                     <span className="pane__spinner" />
-                    <span>Browser starting…</span>
+                    <span>{tr('Browser starting…', '浏览器启动中…')}</span>
                   </>
                 ) : (
                   <span>{primaryLine}</span>
@@ -1206,12 +1211,12 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
                       onClick={() => onResume?.(session.id)}
                     >
                       <ResumeIcon />
-                      <span>Resume</span>
+                      <span>{tr('Resume', '继续')}</span>
                     </button>
                   )}
                   {showErrorUi && isApiKeyError(session.error) && onOpenSettings && (
                     <button className="pane__rerun-btn" onClick={onOpenSettings}>
-                      <span>Open Settings</span>
+                      <span>{tr('Open Settings', '打开设置')}</span>
                     </button>
                   )}
                   {onRerun && (
@@ -1220,7 +1225,7 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
                       onClick={() => onRerun(session.id)}
                     >
                       <RerunIcon />
-                      <span>Rerun task</span>
+                      <span>{tr('Rerun task', '重新运行任务')}</span>
                     </button>
                   )}
                 </div>

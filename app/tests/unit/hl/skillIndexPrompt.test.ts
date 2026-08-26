@@ -78,13 +78,13 @@ describe('skill index prompt', () => {
 });
 
 describe('html block prompt guidance', () => {
-  it('nudges agents to use HTML for dense browser confirmation facts', () => {
+  it('keeps ordinary research in markdown and reserves HTML for visual outcomes', () => {
     const prompt = htmlBlockGuidanceLines('dark').join('\n');
 
-    expect(prompt).toContain('dense, easily organized browser results or confirmations');
-    expect(prompt).toContain('shopping/cart/order summaries');
-    expect(prompt).toContain('delivery windows');
-    expect(prompt).toContain('3+ concrete facts');
+    expect(prompt).toContain('user explicitly asks for a visual/card/HTML presentation');
+    expect(prompt).toContain('PR summaries');
+    expect(prompt).toContain('Never choose HTML merely because');
+    expect(prompt).toContain('plain markdown');
     expect(prompt).toContain('Use shadow #f4ecd8 for large structural offset shadows');
     expect(prompt).toContain('keep accent colors to small highlights');
   });

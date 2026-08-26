@@ -15,6 +15,7 @@ import { useThemedAsset } from '../design/useThemedAsset';
 import { CookieBrowser, type CookieBrowserApi } from '../shared/CookieBrowser';
 import { pollInstalledStatus } from '../shared/installStatus';
 import { useToast } from '@/renderer/components/base/Toast';
+import { useI18n } from './i18n';
 
 type WaStatus = 'disconnected' | 'connecting' | 'qr_ready' | 'connected' | 'error';
 type AuthType = 'oauth' | 'apiKey' | 'none';
@@ -104,6 +105,7 @@ export function ConnectionsPane({
   browserSyncSectionId,
   focusBrowserCodeProvider,
 }: ConnectionsPaneProps): React.ReactElement {
+  const { tr } = useI18n();
   const toast = useToast();
   const openaiLogo = useThemedAsset(openaiLogoDark, openaiLogoLight);
   const opencodeLogo = useThemedAsset(opencodeLogoDark, opencodeLogoLight);
@@ -694,14 +696,14 @@ export function ConnectionsPane({
 
   return (
     <div className={embedded ? 'conn-section' : 'conn-pane'}>
-      {!embedded && <span className="conn-pane__title">Connections</span>}
+      {!embedded && <span className="conn-pane__title">{tr('Connections', '连接')}</span>}
 
       <section
         id={providerSectionId}
         className={embedded ? 'settings-page__section' : 'conn-pane__group'}
       >
       <div className="settings-section-header">
-        <h2 className="settings-section-header__title">Model providers</h2>
+        <h2 className="settings-section-header__title">{tr('Model providers', '模型提供商')}</h2>
       </div>
 
       <div className="conn-card" aria-busy={anthropicLoading}>
@@ -744,7 +746,7 @@ export function ConnectionsPane({
                 onClick={() => handleInstallEngine('claude-code')}
                 disabled={installingEngine === 'claude-code'}
               >
-                {installingEngine === 'claude-code' ? 'Installing…' : 'Install Claude Code'}
+                {installingEngine === 'claude-code' ? tr('Installing…', '安装中…') : tr('Install Claude Code', '安装 Claude Code')}
               </button>
             )}
             {!anthropicLoading && !editing && claudeStatus.installed && authStatus.type === 'none' && (
@@ -753,7 +755,7 @@ export function ConnectionsPane({
                 onClick={handleUseClaudeCode}
                 disabled={claudeWaiting}
               >
-                {claudeWaiting ? 'Waiting…' : 'Sign in with Claude'}
+                {claudeWaiting ? tr('Waiting…', '等待中…') : tr('Sign in with Claude', '登录 Claude')}
               </button>
             )}
             {!anthropicLoading && !editing && claudeStatus.installed && authStatus.type === 'none' && (
@@ -761,7 +763,7 @@ export function ConnectionsPane({
                 className="conn-card__btn conn-card__btn--secondary"
                 onClick={() => { setEditing(true); setDraftKey(''); setKeyStatus('idle'); setKeyError(null); }}
               >
-                Add API key
+                {tr('Add API key', '添加 API 密钥')}
               </button>
             )}
             {!anthropicLoading && !editing && claudeStatus.installed && authStatus.type === 'apiKey' && (
@@ -1015,7 +1017,7 @@ export function ConnectionsPane({
                 onClick={() => handleInstallEngine('codex')}
                 disabled={installingEngine === 'codex'}
               >
-                {installingEngine === 'codex' ? 'Installing…' : 'Install Codex'}
+                {installingEngine === 'codex' ? tr('Installing…', '安装中…') : tr('Install Codex', '安装 Codex')}
               </button>
             )}
             {!openaiLoading && !openaiEditing && !openaiStatus.present && !codexStatus.authed && codexStatus.installed && (
@@ -1023,7 +1025,7 @@ export function ConnectionsPane({
                 className="conn-card__btn conn-card__btn--primary"
                 onClick={handleCodexLoginPlain}
               >
-                {codexWaiting ? 'Restart' : 'Sign in with Codex'}
+                {codexWaiting ? tr('Restart', '重新开始') : tr('Sign in with Codex', '登录 Codex')}
               </button>
             )}
             {!openaiLoading && !openaiEditing && codexStatus.installed && !openaiStatus.present && !codexStatus.authed && (
@@ -1031,7 +1033,7 @@ export function ConnectionsPane({
                 className="conn-card__btn conn-card__btn--secondary"
                 onClick={() => { setOpenaiEditing(true); setOpenaiDraft(''); setOpenaiKeyStatus('idle'); setOpenaiError(null); }}
               >
-                Add API key
+                {tr('Add API key', '添加 API 密钥')}
               </button>
             )}
             {!openaiLoading && !openaiEditing && codexStatus.installed && openaiStatus.present && (
@@ -1039,17 +1041,17 @@ export function ConnectionsPane({
                 className="conn-card__btn conn-card__btn--secondary"
                 onClick={() => { setOpenaiEditing(true); setOpenaiDraft(''); setOpenaiKeyStatus('idle'); setOpenaiError(null); }}
               >
-                Change API key
+                {tr('Change API key', '更换 API 密钥')}
               </button>
             )}
             {!openaiLoading && !openaiEditing && openaiStatus.present && !codexStatus.authed && (
               <button className="conn-card__btn conn-card__btn--secondary" onClick={handleDeleteOpenai}>
-                Sign out
+                {tr('Sign out', '退出登录')}
               </button>
             )}
             {!openaiLoading && !openaiEditing && codexStatus.authed && (
               <button className="conn-card__btn conn-card__btn--secondary" onClick={handleCodexLogout}>
-                {openaiStatus.present ? 'Sign out of ChatGPT' : 'Sign out'}
+                {openaiStatus.present ? tr('Sign out of ChatGPT', '退出 ChatGPT') : tr('Sign out', '退出登录')}
               </button>
             )}
             {!openaiLoading && openaiEditing && (
@@ -1057,14 +1059,14 @@ export function ConnectionsPane({
                 className="conn-card__btn conn-card__btn--secondary"
                 onClick={() => { setOpenaiEditing(false); setOpenaiDraft(''); setOpenaiError(null); setOpenaiKeyStatus('idle'); }}
               >
-                Cancel
+                {tr('Cancel', '取消')}
               </button>
             )}
           </div>
         </div>
         {codexDeviceCode && (
           <div className="codex-device-auth">
-            <div className="codex-device-auth__label">One-time code</div>
+            <div className="codex-device-auth__label">{tr('One-time code', '一次性代码')}</div>
             <div className="codex-device-auth__code">{codexDeviceCode}</div>
             {codexVerificationUrl && (
               <div className="codex-device-auth__hint">
@@ -1085,7 +1087,7 @@ export function ConnectionsPane({
             className="codex-device-auth__link codex-device-auth__link--secondary codex-device-auth__fallback"
             onClick={handleCodexLoginDeviceAuth}
           >
-            Having trouble? Use device code flow instead
+            {tr('Having trouble? Use device code flow instead', '遇到问题？改用设备代码登录')}
           </button>
         )}
         {openaiEditing && (
@@ -1104,14 +1106,14 @@ export function ConnectionsPane({
               onClick={handleSaveOpenai}
               disabled={!openaiDraft.trim() || openaiKeyStatus === 'testing'}
             >
-              {openaiKeyStatus === 'testing' ? 'Testing...' : 'Save'}
+              {openaiKeyStatus === 'testing' ? tr('Testing...', '测试中…') : tr('Save', '保存')}
             </button>
             {openaiStatus.present && (
               <button
                 className="conn-card__btn conn-card__btn--secondary"
                 onClick={() => { void handleDeleteOpenai(); setOpenaiEditing(false); }}
               >
-                Remove API key
+                {tr('Remove API key', '移除 API 密钥')}
               </button>
             )}
             {openaiKeyStatus === 'error' && openaiError && (
@@ -1132,7 +1134,7 @@ export function ConnectionsPane({
         className={embedded ? 'settings-page__section' : 'conn-pane__group'}
       >
       <div className="settings-section-header">
-        <h2 className="settings-section-header__title">Connections</h2>
+        <h2 className="settings-section-header__title">{tr('Connections', '连接')}</h2>
       </div>
 
       <div className="conn-card">
@@ -1158,22 +1160,22 @@ export function ConnectionsPane({
           <div className="conn-card__actions">
             {waStatus === 'disconnected' && (
               <button className="conn-card__btn conn-card__btn--primary" onClick={handleConnect}>
-                Connect
+                {tr('Connect', '连接')}
               </button>
             )}
             {(waStatus === 'qr_ready' || waStatus === 'connecting') && (
               <button className="conn-card__btn conn-card__btn--secondary" onClick={handleCancel}>
-                Cancel
+                {tr('Cancel', '取消')}
               </button>
             )}
             {waStatus === 'connected' && (
               <button className="conn-card__btn conn-card__btn--secondary" onClick={handleDisconnect}>
-                Disconnect
+                {tr('Disconnect', '断开连接')}
               </button>
             )}
             {waStatus === 'error' && (
               <button className="conn-card__btn conn-card__btn--primary" onClick={handleConnect}>
-                Reconnect
+                {tr('Reconnect', '重新连接')}
               </button>
             )}
           </div>
@@ -1213,7 +1215,7 @@ export function ConnectionsPane({
         className={embedded ? 'settings-page__section' : 'conn-pane__group'}
       >
       <div className="settings-section-header">
-        <h2 className="settings-section-header__title">Browser Sync</h2>
+        <h2 className="settings-section-header__title">{tr('Browser Sync', '浏览器同步')}</h2>
       </div>
 
       {cookieBrowserApi ? (

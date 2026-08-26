@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const MAX_DESCRIPTION_LENGTH = 180;
-const DEFAULT_MAX_CHARS = 14_000;
+const DEFAULT_MAX_CHARS = 8_000;
 
 interface SkillIndexEntry {
   id: string;
@@ -13,6 +13,7 @@ interface SkillIndexEntry {
 
 export const SKILL_DISCOVERY_AND_LIFECYCLE_LINES = [
   'Use `agent-skill search` and `agent-skill view` to find relevant skills before inventing browser, site, or workflow-specific steps.',
+  'Only load a skill when its named site or workflow directly matches the task. If search results are unrelated, skip them and continue without a skill; never substitute a different website merely because it appeared in search.',
   'After a task succeeds, create or patch a user skill only when the new procedure is likely to repeat, long-running enough to justify reuse, or generally applicable beyond the current session.',
   'Do not write skills for one-off facts/calculations, temporary page state, secrets/tokens, private account details, failed/speculative workflows, or content that belongs in the task output.',
 ];
@@ -55,8 +56,8 @@ export function htmlBlockGuidanceLines(theme: 'light' | 'dark' = 'dark'): string
   return [
     `UI THEME: ${theme}. When you emit a \`\`\`html block, use the active palette below. The full per-theme reference lives in the 'neobrutalist-html' interaction skill.`,
     `Active palette — card bg ${p.cardBg}, border ${p.border}, shadow ${p.shadow}, foreground ${p.fg}. Accents: ${p.accents}. Use shadow ${p.shadow} for large structural offset shadows; keep accent colors to small highlights, badges, selected metrics, or short dividers.`,
-    'HTML blocks are an optional output channel — use them when layout helps the reader (plans, comparisons, status, timelines, diffs). Also use them for dense, easily organized browser results or confirmations: shopping/cart/order summaries, delivery windows, addresses, prices, quantities, retailer/site names, reservation details, selected items, and next-step choices. Conversational replies, tool previews, and short answers should stay as plain markdown.',
-    'Rule of thumb: if you have 3+ concrete facts from the page that naturally fit labeled rows, columns, cards, or a receipt-style summary, emit a compact ```html block instead of burying them in a paragraph.',
+    'HTML blocks are an optional visual-artifact channel. Use them only when the user explicitly asks for a visual/card/HTML presentation, or when a dense commerce or reservation result materially needs a receipt-style layout. Ordinary research answers, comparisons, status reports, PR summaries, tool previews, and conversational replies must stay as plain markdown.',
+    'Never choose HTML merely because the answer contains several facts. Prefer concise markdown unless the richer layout is clearly part of the requested outcome.',
     'When you emit an HTML block, keep it self-contained: inline styles or a single inline <style> tag are fine; do not reference external stylesheets, scripts, fonts, or images by URL — the sandbox blocks them.',
   ];
 }

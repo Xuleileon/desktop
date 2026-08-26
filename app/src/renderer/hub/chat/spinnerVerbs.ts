@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { create } from 'zustand';
+import { useLanguageStore } from '../i18n';
 import { persist } from 'zustand/middleware';
 
 /**
@@ -147,6 +148,7 @@ export function selectActiveVerbs(state: SpinnerVerbsState): ReadonlyArray<strin
  * lifetime of the indicator.
  */
 export function useCyclingVerb(): string {
+  const locale = useLanguageStore((s) => s.locale);
   const presetId = useSpinnerVerbsStore((s) => s.presetId);
   const customVerbs = useSpinnerVerbsStore((s) => s.customVerbs);
   const cycleMs = useSpinnerVerbsStore((s) => s.cycleMs);
@@ -172,5 +174,6 @@ export function useCyclingVerb(): string {
     return () => window.clearInterval(id);
   }, [verbs, cycleMs]);
 
+  if (locale === 'zh-CN') return '处理中';
   return verbs[idx] ?? 'Working';
 }

@@ -2,7 +2,7 @@ type HeaderMap = Record<string, string>;
 
 export interface BrowserIdentity {
   userAgent: string;
-  firefoxVersion: string;
+  chromiumVersion: string;
   jsPlatform: string;
   platformLabel: string;
   acceptLanguageHeader: string;
@@ -11,22 +11,8 @@ export interface BrowserIdentity {
   languages: string[];
 }
 
-const USER_AGENT_CLIENT_HINT_HEADERS = [
-  'sec-ch-ua',
-  'sec-ch-ua-mobile',
-  'sec-ch-ua-platform',
-  'sec-ch-ua-arch',
-  'sec-ch-ua-bitness',
-  'sec-ch-ua-full-version',
-  'sec-ch-ua-full-version-list',
-  'sec-ch-ua-form-factors',
-  'sec-ch-ua-model',
-  'sec-ch-ua-platform-version',
-  'sec-ch-ua-wow64',
-] as const;
-
-function firefoxVersion(version = '140.0'): string {
-  return /^\d+\.\d+(?:\.\d+)?$/.test(version) ? version : '140.0';
+function chromiumVersion(version = process.versions.chrome ?? '146.0.0.0'): string {
+  return /^\d+\.\d+\.\d+\.\d+$/.test(version) ? version : '146.0.0.0';
 }
 
 function platformParts(platform: NodeJS.Platform): Pick<BrowserIdentity, 'jsPlatform' | 'platformLabel'> & { uaPlatform: string } {
@@ -52,21 +38,26 @@ function platformParts(platform: NodeJS.Platform): Pick<BrowserIdentity, 'jsPlat
 }
 
 export function buildBrowserIdentity(opts: {
-  firefoxVersion?: string;
+  chromiumVersion?: string;
   platform?: NodeJS.Platform;
 } = {}): BrowserIdentity {
-  const version = firefoxVersion(opts.firefoxVersion);
+  const version = chromiumVersion(opts.chromiumVersion);
+  const major = version.split('.')[0];
   const platform = platformParts(opts.platform ?? process.platform);
-  const userAgent = `Mozilla/5.0 (${platform.uaPlatform}; rv:${version}) Gecko/20100101 Firefox/${version}`;
+  // Keep the public identity coherent with Electron's actual Chromium engine.
+  // Pretending Chromium is Firefox creates contradictions across UA, TLS,
+  // WebGL and the exposed web-platform feature set that are easier to detect
+  // than a normal, reduced Chrome UA.
+  const userAgent = `Mozilla/5.0 (${platform.uaPlatform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;
   return {
     userAgent,
-    firefoxVersion: version,
+    chromiumVersion: version,
     jsPlatform: platform.jsPlatform,
     platformLabel: platform.platformLabel,
-    acceptLanguageHeader: 'en-US,en;q=0.9',
-    acceptLanguageOverride: 'en-US,en',
-    language: 'en-US',
-    languages: ['en-US', 'en'],
+    acceptLanguageHeader: 'zh-CN,zh;q=0.9,en;q=0.8',
+    acceptLanguageOverride: 'zh-CN,zh,en',
+    language: 'zh-CN',
+    languages: ['zh-CN', 'zh', 'en'],
   };
 }
 
@@ -75,15 +66,23 @@ function setHeader(headers: HeaderMap, name: string, value: string): void {
   headers[existing ?? name] = value;
 }
 
-function deleteHeader(headers: HeaderMap, name: string): void {
-  const existing = Object.keys(headers).find((key) => key.toLowerCase() === name.toLowerCase());
-  if (existing) delete headers[existing];
+function hasHeader(headers: HeaderMap, name: string): boolean {
+  return Object.keys(headers).some((key) => key.toLowerCase() === name.toLowerCase());
 }
 
 export function withBrowserIdentityHeaders(headers: HeaderMap, identity = buildBrowserIdentity()): HeaderMap {
   const next = { ...headers };
   setHeader(next, 'User-Agent', identity.userAgent);
   setHeader(next, 'Accept-Language', identity.acceptLanguageHeader);
-  for (const header of USER_AGENT_CLIENT_HINT_HEADERS) deleteHeader(next, header);
+  // Keep native hint coverage, but never leak an Electron brand. Do not add
+  // hints Chromium did not request; only normalize the two brand-bearing
+  // fields when they are already present.
+  const major = identity.chromiumVersion.split('.')[0];
+  if (hasHeader(next, 'sec-ch-ua')) {
+    setHeader(next, 'sec-ch-ua', `"Not_A Brand";v="99", "Chromium";v="${major}"`);
+  }
+  if (hasHeader(next, 'sec-ch-ua-full-version-list')) {
+    setHeader(next, 'sec-ch-ua-full-version-list', `"Not_A Brand";v="99.0.0.0", "Chromium";v="${identity.chromiumVersion}"`);
+  }
   return next;
 }

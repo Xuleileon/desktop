@@ -18,11 +18,13 @@ import './hub.css';
 import { initThemeMode } from '@/renderer/design/themeMode';
 import { makeLogger } from '@/renderer/shared/logger';
 import { isIgnorableRendererMessage } from '@/shared/rendererNoise';
+import { initLocale } from './i18n';
 
 // Apply shell theme — hub uses the same dark palette
 document.documentElement.dataset.theme = 'shell';
 document.documentElement.dataset.platform = detectPlatform();
 initThemeMode();
+initLocale();
 
 function detectPlatform(): 'mac' | 'win' | 'linux' {
   const ua = navigator.userAgent || '';

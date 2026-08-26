@@ -16,6 +16,7 @@ import { orderSessionsForSidebar } from './sessionOrdering';
 import { ChatPane } from './chat/ChatPane';
 import { useUIStore } from './state/uiStore';
 import { useSessionsBridge } from './state/useSessionsBridge';
+import { useI18n } from './i18n';
 
 type ViewMode = 'dashboard' | 'grid' | 'chat' | 'settings';
 type SettingsOpenPayload = {
@@ -26,6 +27,7 @@ type SettingsOpenPayload = {
 let sessionCounter = MOCK_SESSIONS.length + 1;
 
 export function HubApp(): React.ReactElement {
+  const { tr } = useI18n();
   const isMock = import.meta.env.VITE_MOCK_MODE === '1';
   const [mockSessions, setMockSessions] = useState<AgentSession[]>(isMock ? MOCK_SESSIONS : []);
   const sessionsQuery = useSessionsQuery();
@@ -132,7 +134,12 @@ export function HubApp(): React.ReactElement {
   }, []);
 
   const restoreBrowserViewsForCurrentMode = useCallback(() => {
-    window.electronAPI?.sessions?.viewsSetVisible?.(viewMode === 'grid')?.catch(() => {});
+    const visible = viewMode === 'grid';
+    window.electronAPI?.sessions?.viewsSetVisible?.(visible)
+      ?.then(() => {
+        if (visible) window.dispatchEvent(new CustomEvent('pane:layout-change'));
+      })
+      .catch(() => {});
   }, [viewMode]);
 
   const openSettingsPage = useCallback((payload?: SettingsOpenPayload) => {
@@ -524,7 +531,7 @@ export function HubApp(): React.ReactElement {
                 setViewMode('grid');
               }}
             />
-          : <div className="chat-empty">No session selected. <button className="chat-pane__back" onClick={() => setViewMode('dashboard')}>Back to dashboard</button></div>
+          : <div className="chat-empty">{tr('No session selected.', '尚未选择会话。')} <button className="chat-pane__back" onClick={() => setViewMode('dashboard')}>{tr('Back to dashboard', '返回主页')}</button></div>
       ) : viewMode === 'dashboard' ? (
         <Dashboard
           sessions={sessions}

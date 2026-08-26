@@ -96,14 +96,13 @@ describe('BrowserPool — creation', () => {
     expect(pool.getView('nonexistent')).toBeNull();
   });
 
-  it('sets session views to a Firefox-compatible user agent', () => {
+  it('sets session views to a Chromium-compatible user agent', () => {
     const view = pool.create('s1');
     const ua = (view!.webContents as unknown as { getUserAgent: () => string }).getUserAgent();
 
-    expect(ua).toContain('Firefox/');
-    expect(ua).toContain('Gecko/20100101');
-    expect(ua).not.toContain('Chrome/');
-    expect(ua).not.toContain('Safari/');
+    expect(ua).toContain('Chrome/');
+    expect(ua).toContain('Safari/537.36');
+    expect(ua).not.toContain('Firefox/');
     expect(ua).not.toContain('Electron');
     expect(ua).not.toContain('BrowserUse');
   });
@@ -252,6 +251,28 @@ describe('BrowserPool — attach/detach', () => {
     pool.attachToWindow('s1', win, { x: 0, y: 0, width: 800, height: 600 });
     const ok = pool.attachToWindow('s1', win, { x: 50, y: 50, width: 640, height: 480 });
     expect(ok).toBe(true);
+  });
+
+  it('keeps only the selected full-size session attached', () => {
+    const first = pool.create('s1');
+    const second = pool.create('s2');
+    pool.attachToWindow('s1', win, { x: 0, y: 0, width: 800, height: 600 });
+    pool.attachToWindow('s2', win, { x: 0, y: 0, width: 800, height: 600 });
+
+    expect(win.contentView.children).not.toContain(first);
+    expect(win.contentView.children).toContain(second);
+    expect(pool.getStats().sessions.find((s) => s.sessionId === 's1')?.attached).toBe(false);
+    expect(pool.getStats().sessions.find((s) => s.sessionId === 's2')?.attached).toBe(true);
+  });
+
+  it('raises an already attached selected session above parked siblings', async () => {
+    const selected = pool.create('selected');
+    const parked = pool.create('parked');
+    await pool.parkForPreview('parked', win);
+    pool.attachToWindow('selected', win, { x: 0, y: 0, width: 800, height: 600 });
+
+    expect(win.contentView.children.at(-1)).toBe(selected);
+    expect(win.contentView.children).toContain(parked);
   });
 
   it('keeps an attached view edge-to-edge and resets page zoom', () => {

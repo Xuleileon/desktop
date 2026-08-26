@@ -75,6 +75,31 @@ describe('bootstrapHarness browser-harness-js materialization', () => {
     }
   });
 
+  test('keeps startup usable when Windows cannot remove an existing harness tree', () => {
+    bootstrapHarness();
+    const target = browserHarnessJsDir();
+    const staleFile = path.join(target, 'stale-from-running-agent.txt');
+    fs.writeFileSync(staleFile, 'still open');
+
+    const originalRmSync = fs.rmSync.bind(fs);
+    const rmSpy = vi.spyOn(fs, 'rmSync').mockImplementation((candidate, options) => {
+      if (path.resolve(String(candidate)) === path.resolve(target)) {
+        const err = new Error(`ENOTEMPTY: directory not empty, rmdir '${target}'`) as NodeJS.ErrnoException;
+        err.code = 'ENOTEMPTY';
+        throw err;
+      }
+      return originalRmSync(candidate, options);
+    });
+
+    try {
+      expect(() => bootstrapHarness()).not.toThrow();
+      expect(fs.existsSync(path.join(target, 'sdk', 'browser-harness-js.cmd'))).toBe(true);
+      expect(fs.existsSync(staleFile)).toBe(true);
+    } finally {
+      rmSpy.mockRestore();
+    }
+  });
+
   test('rejects traversal and absolute skill IDs before converting to paths', () => {
     const root = path.join(mockState.userData, 'harness');
 

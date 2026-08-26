@@ -6,15 +6,14 @@ HTML candidate, make it look like this.
 
 ## Good HTML candidates
 
-Use an HTML block when the output has dense facts that are easy to organize into
-labeled rows, columns, cards, or a receipt-style summary. Browser task
-confirmations often qualify: selected item, retailer, cart quantity, price,
-delivery/pickup window, delivery address, reservation details, order state, and
-next-step choices. If you have 3+ concrete facts from the page, a compact HTML
-summary is usually easier to scan than a prose paragraph.
+Use an HTML block when the user explicitly asks for a visual/card/HTML result,
+or when a dense shopping, delivery, reservation, pricing, or quantity summary
+materially benefits from a receipt-style layout. Ordinary research, PR reviews,
+status reports, comparisons, and conversational answers should stay in markdown;
+several facts alone are not a reason to use HTML.
 
-Keep genuinely short answers in markdown. Don't emit HTML just to decorate one
-sentence.
+Keep short and ordinary answers in markdown. Don't emit HTML just to decorate
+an answer.
 
 ## Structure patterns
 
