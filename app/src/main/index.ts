@@ -8,6 +8,7 @@
  */
 
 import { config as loadDotEnv } from 'dotenv';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -1769,17 +1770,19 @@ app.whenReady().then(async () => {
       return { revealed: false, error: 'file no longer exists' };
     }
     if (process.platform === 'win32') {
-      // Electron's showItemInFolder is fire-and-forget on Windows: it can show
-      // a native "Location is unavailable" dialog while this handler still
-      // records success. Opening the already-verified parent directory has a
-      // real error result and is stable for Unicode skill/output filenames.
-      const parentDir = path.dirname(resolvedPath);
-      const err = await shell.openPath(parentDir);
-      if (err) {
-        mainLogger.warn('main.sessions:reveal-output.openParentFailed', { path: resolvedPath, parentDir, error: err });
-        throw new Error(err);
-      }
-      mainLogger.info('main.sessions:reveal-output', { path: resolvedPath, parentDir, platform: process.platform, mode: 'open-parent' });
+      const explorerPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'explorer.exe');
+      await new Promise<void>((resolve, reject) => {
+        const explorer = spawn(explorerPath, ['/select,', resolvedPath], {
+          detached: true,
+          stdio: 'ignore',
+        });
+        explorer.once('error', reject);
+        explorer.once('spawn', () => {
+          explorer.unref();
+          resolve();
+        });
+      });
+      mainLogger.info('main.sessions:reveal-output', { path: resolvedPath, platform: process.platform, mode: 'explorer-select' });
     } else {
       shell.showItemInFolder(resolvedPath);
       mainLogger.info('main.sessions:reveal-output', { path: resolvedPath, platform: process.platform, mode: 'select-file' });

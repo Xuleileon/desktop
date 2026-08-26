@@ -22,6 +22,10 @@ interface ChatPaneProps {
   onExit: () => void;
 }
 
+export function isTerminalChatSession(status: string, canResume: boolean | undefined): boolean {
+  return (status === 'idle' || status === 'stopped') && canResume !== true;
+}
+
 function formatCost(usd?: number): string {
   if (usd === undefined) return '';
   if (usd < 0.01) return `$${usd.toFixed(4)}`;
@@ -117,7 +121,9 @@ export function ChatPane({ sessionId, onSwitchToBrowser, onExit }: ChatPaneProps
   // re-targets the Dashboard's TaskInput instead of this pane's composer.
   // We seed a one-shot prompt in the UI store and navigate home; Dashboard
   // consumes it on mount.
-  const isTerminal = header?.canResume === false || header?.status === 'stopped';
+  const isTerminal = header
+    ? isTerminalChatSession(header.status, header.canResume)
+    : false;
   const onQuote = useCallback((text: string) => {
     console.log('[ChatPane] quote', { length: text.length, isTerminal });
     if (isTerminal) {
@@ -230,7 +236,7 @@ export function ChatPane({ sessionId, onSwitchToBrowser, onExit }: ChatPaneProps
 
   const composer = useMemo(() => {
     if (!header) return null;
-    const isTerminal = header.canResume === false || header.status === 'stopped';
+    const isTerminal = isTerminalChatSession(header.status, header.canResume);
     const isBusy = header.status === 'running' || header.status === 'stuck';
 
     if (isTerminal) {
