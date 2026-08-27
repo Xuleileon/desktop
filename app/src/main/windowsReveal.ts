@@ -1,29 +1,25 @@
-export interface WindowsExplorerRevealSpec {
+import path from 'node:path';
+
+export interface WindowsExplorerOpenSpec {
+  openPath: string;
   args: string[];
-  mode: 'open-directory' | 'select-file';
-  windowsVerbatimArguments?: boolean;
 }
 
 /**
- * Build the command line expected by Explorer's non-standard argument parser.
- * `/select,` and the quoted file path must be one verbatim argument; passing
- * them as two argv entries makes Explorer treat the parent directory as an
- * unavailable location on paths containing spaces.
+ * Explorer's `/select` parser is not reliable for paths containing spaces.
+ * Open an existing directory instead: the requested directory itself, or the
+ * parent directory of a requested file.
  */
-export function windowsExplorerRevealSpec(
+export function windowsExplorerOpenSpec(
   resolvedPath: string,
   isDirectory: boolean,
-): WindowsExplorerRevealSpec {
-  if (isDirectory) {
-    return {
-      args: [resolvedPath],
-      mode: 'open-directory',
-    };
-  }
-
+): WindowsExplorerOpenSpec {
+  const openPath = isDirectory ? resolvedPath : path.win32.dirname(resolvedPath);
   return {
-    args: [`/select,"${resolvedPath}"`],
-    mode: 'select-file',
-    windowsVerbatimArguments: true,
+    openPath,
+    // Let Node quote this single argv entry. Explorer's `/select` parser and
+    // Electron shell.openPath both produced native "Location unavailable"
+    // dialogs for Browser Use paths containing spaces on Windows.
+    args: [openPath],
   };
 }

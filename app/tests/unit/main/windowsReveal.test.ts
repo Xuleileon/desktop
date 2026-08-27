@@ -1,22 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { windowsExplorerRevealSpec } from '../../../src/main/windowsReveal';
+import { windowsExplorerOpenSpec } from '../../../src/main/windowsReveal';
 
-describe('windowsExplorerRevealSpec', () => {
-  const directory = 'C:\\Users\\dingx\\AppData\\Roaming\\Browser Use\\harness\\outputs\\run-123';
+describe('windowsExplorerOpenSpec', () => {
+  const directory = 'C:\\Users\\example\\AppData\\Roaming\\Browser Use\\harness\\outputs\\run-123';
   const file = `${directory}\\result.json`;
 
   it('opens a directory directly instead of trying to select it', () => {
-    expect(windowsExplorerRevealSpec(directory, true)).toEqual({
+    expect(windowsExplorerOpenSpec(directory, true)).toEqual({
+      openPath: directory,
       args: [directory],
-      mode: 'open-directory',
     });
   });
 
-  it('keeps /select and the quoted file path in one verbatim argument', () => {
-    expect(windowsExplorerRevealSpec(file, false)).toEqual({
-      args: [`/select,"${file}"`],
-      mode: 'select-file',
-      windowsVerbatimArguments: true,
+  it('opens the parent directory for a file path containing spaces', () => {
+    expect(windowsExplorerOpenSpec(file, false)).toEqual({
+      openPath: directory,
+      args: [directory],
     });
   });
 });

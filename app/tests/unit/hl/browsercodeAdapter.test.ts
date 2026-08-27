@@ -67,6 +67,8 @@ describe('browsercode adapter stdin payload mode', () => {
 
     expect(wrappedPrompt).toContain('likely to repeat, long-running enough to justify reuse, or generally applicable');
     expect(wrappedPrompt).toContain('Do not write skills for one-off facts/calculations');
+    expect(wrappedPrompt).toContain('always use `await listPageTargets()`');
+    expect(wrappedPrompt).toContain('Whole-page text');
   });
 
   it('uses BrowserCode pure mode when lean mode is enabled', () => {

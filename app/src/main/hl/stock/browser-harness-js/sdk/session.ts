@@ -11,7 +11,18 @@ import { bindDomains, type Domains, type Transport } from './generated.ts';
 type Pending = {
   resolve: (v: unknown) => void;
   reject: (e: unknown) => void;
+  method: string;
+  timer: ReturnType<typeof setTimeout>;
 };
+
+export type SessionOptions = {
+  /** Maximum time for one CDP command response. Defaults to CDP_CALL_TIMEOUT_MS or 30000ms. */
+  callTimeoutMs?: number;
+};
+
+const DEFAULT_CDP_CALL_TIMEOUT_MS = 30_000;
+const MIN_CDP_CALL_TIMEOUT_MS = 100;
+const MAX_CDP_CALL_TIMEOUT_MS = 120_000;
 
 export type ConnectOptions = {
   /** Full WS URL: ws://host:port/devtools/browser/<id>. Escape hatch. */
@@ -55,12 +66,22 @@ export class Session implements Transport {
   private eventListeners: Array<(method: string, params: unknown, sessionId?: string) => void> = [];
   private readonly assignedTargetId = process.env.BU_TARGET_ID?.trim() || undefined;
   private readonly assignedPort = process.env.BU_CDP_PORT?.trim() || undefined;
+  private readonly ownedTargetIds = new Set<string>(this.assignedTargetId ? [this.assignedTargetId] : []);
+  private readonly ownedSessionIds = new Set<string>();
+  private readonly callTimeoutMs: number;
+  private assignedBrowserContextId: string | undefined;
 
   // Generated bindings — one per CDP domain.
   // Initialized lazily after construction so `_call` is available.
   domains!: Domains;
 
-  constructor() {
+  constructor(options: SessionOptions = {}) {
+    this.callTimeoutMs = boundedTimeoutMs(
+      options.callTimeoutMs ?? process.env.CDP_CALL_TIMEOUT_MS,
+      DEFAULT_CDP_CALL_TIMEOUT_MS,
+      MIN_CDP_CALL_TIMEOUT_MS,
+      MAX_CDP_CALL_TIMEOUT_MS,
+    );
     this.domains = bindDomains(this);
     // Mirror domains onto `this` so calls read as `session.Page.navigate(...)`.
     for (const k of Object.keys(this.domains) as (keyof Domains)[]) {
@@ -150,8 +171,7 @@ export class Session implements Transport {
         if (this.ws === ws) {
           this.ws = undefined;
           this.activeSessionId = undefined;
-          for (const [, p] of this.pending) p.reject(new Error('CDP socket closed'));
-          this.pending.clear();
+          this.rejectAllPending(new Error('CDP socket closed'));
         }
         finish(new Error('WS closed before open (likely 403 or port closed)'));
       });
@@ -167,8 +187,7 @@ export class Session implements Transport {
     const ws = this.ws;
     this.ws = undefined;
     this.activeSessionId = undefined;
-    for (const [, p] of this.pending) p.reject(new Error('CDP socket closed'));
-    this.pending.clear();
+    this.rejectAllPending(new Error('CDP socket closed'));
     ws?.close();
   }
 
@@ -177,18 +196,27 @@ export class Session implements Transport {
    * Uses Target.attachToTarget with flatten:true (single-WS, sessionId-on-message).
    */
   async use(targetId: string): Promise<string> {
-    if (this.assignedTargetId && targetId !== this.assignedTargetId) {
-      throw new Error(`Browser isolation: target ${targetId} belongs to another browser view.`);
+    if (this.assignedTargetId && !this.ownedTargetIds.has(targetId)) {
+      await this._call('Target.getTargets', {});
+      if (!this.ownedTargetIds.has(targetId)) {
+        throw new Error(`Browser isolation: target ${targetId} belongs to another conversation Space.`);
+      }
     }
+    // Keep the Desktop's visible page in lock-step with the target selected by
+    // the agent. Attaching alone changes CDP routing but does not necessarily
+    // focus the corresponding WebContentsView, which leaves the tab strip and
+    // live preview showing a different page from the one being automated.
+    await this._call('Target.activateTarget', { targetId });
     const r = await this._call('Target.attachToTarget', { targetId, flatten: true }) as { sessionId: string };
     this.activeSessionId = r.sessionId;
+    if (this.assignedTargetId) this.ownedSessionIds.add(r.sessionId);
     return r.sessionId;
   }
 
   /** Set the active sessionId directly (e.g. one you already attached). */
   setActiveSession(sessionId: string | undefined): void {
-    if (this.assignedTargetId && sessionId !== this.activeSessionId) {
-      throw new Error('Browser isolation: the assigned target session cannot be replaced or detached.');
+    if (this.assignedTargetId && sessionId && !this.ownedSessionIds.has(sessionId)) {
+      throw new Error('Browser isolation: the CDP session does not belong to this conversation Space.');
     }
     this.activeSessionId = sessionId;
   }
@@ -235,23 +263,41 @@ export class Session implements Transport {
       msg.sessionId = this.activeSessionId;
     }
     const response = new Promise<unknown>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.ws!.send(JSON.stringify(msg));
+      const timer = setTimeout(() => {
+        if (!this.pending.delete(id)) return;
+        reject(new CdpTimeoutError(method, this.callTimeoutMs));
+      }, this.callTimeoutMs);
+      this.pending.set(id, { resolve, reject, method, timer });
+      try {
+        this.ws!.send(JSON.stringify(msg));
+      } catch (error) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(error);
+      }
     });
     if (this.assignedTargetId && method === 'Target.getTargets') {
       return response.then((result) => {
         const record = result && typeof result === 'object' ? result as Record<string, unknown> : {};
-        const targetInfos = Array.isArray(record.targetInfos) ? record.targetInfos : [];
+        const targetInfos = Array.isArray(record.targetInfos)
+          ? record.targetInfos.filter((info): info is Record<string, unknown> => Boolean(info && typeof info === 'object'))
+          : [];
+        this.refreshOwnedTargets(targetInfos);
         return {
           ...record,
-          targetInfos: targetInfos.filter((info) => (
-            info && typeof info === 'object'
-            && (info as Record<string, unknown>).targetId === this.assignedTargetId
-          )),
+          targetInfos: targetInfos.filter((info) => this.ownedTargetIds.has(String(info.targetId ?? ''))),
         };
       });
     }
     return response;
+  }
+
+  private rejectAllPending(error: Error): void {
+    for (const [, pending] of this.pending) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+    }
+    this.pending.clear();
   }
 
   private browserIsolationError(method: string, params: unknown): string | null {
@@ -259,10 +305,18 @@ export class Session implements Transport {
     if (!assignedTargetId) return null;
     const record = params && typeof params === 'object' ? params as Record<string, unknown> : {};
     if (method === 'Target.getTargets') return null;
-    if (method === 'Target.attachToTarget' || method === 'Target.activateTarget' || method === 'Target.getTargetInfo') {
+    if (
+      method === 'Target.attachToTarget'
+      || method === 'Target.activateTarget'
+      || method === 'Target.getTargetInfo'
+      || method === 'Target.closeTarget'
+    ) {
       const requestedTarget = record.targetId;
-      if (requestedTarget === assignedTargetId) return null;
-      return `Browser isolation: ${method} may only address the assigned target.`;
+      if (method === 'Target.closeTarget' && requestedTarget === assignedTargetId) {
+        return 'Browser isolation: the assigned root target anchors this conversation Space and cannot be closed.';
+      }
+      if (typeof requestedTarget === 'string' && this.ownedTargetIds.has(requestedTarget)) return null;
+      return `Browser isolation: ${method} may only address a target in the assigned conversation Space.`;
     }
     if (method.startsWith('Target.')) {
       return `Browser isolation: ${method} is not available inside a conversation-scoped browser view.`;
@@ -273,6 +327,31 @@ export class Session implements Transport {
     return null;
   }
 
+  private refreshOwnedTargets(targetInfos: Record<string, unknown>[]): void {
+    const assignedInfo = targetInfos.find((info) => info.targetId === this.assignedTargetId);
+    if (typeof assignedInfo?.browserContextId === 'string') {
+      this.assignedBrowserContextId = assignedInfo.browserContextId;
+    }
+    if (this.assignedBrowserContextId) {
+      for (const info of targetInfos) {
+        if (info.browserContextId === this.assignedBrowserContextId && typeof info.targetId === 'string') {
+          this.ownedTargetIds.add(info.targetId);
+        }
+      }
+    }
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const info of targetInfos) {
+        const targetId = typeof info.targetId === 'string' ? info.targetId : '';
+        const openerId = typeof info.openerId === 'string' ? info.openerId : '';
+        if (!targetId || this.ownedTargetIds.has(targetId) || !this.ownedTargetIds.has(openerId)) continue;
+        this.ownedTargetIds.add(targetId);
+        changed = true;
+      }
+    }
+  }
+
   private onMessage(raw: string): void {
     let m: any;
     try { m = JSON.parse(raw); } catch { return; }
@@ -280,9 +359,28 @@ export class Session implements Transport {
       const p = this.pending.get(m.id);
       if (!p) return;
       this.pending.delete(m.id);
+      clearTimeout(p.timer);
       if (m.error) p.reject(new CdpError(m.error.code, m.error.message, m.error.data));
       else p.resolve(m.result);
     } else if (m.method) {
+      if (this.assignedTargetId && m.method.startsWith('Target.')) {
+        const params = m.params && typeof m.params === 'object' ? m.params as Record<string, unknown> : {};
+        const targetInfo = params.targetInfo && typeof params.targetInfo === 'object'
+          ? params.targetInfo as Record<string, unknown>
+          : null;
+        if (targetInfo) {
+          this.refreshOwnedTargets([targetInfo]);
+          const eventTargetId = typeof targetInfo.targetId === 'string' ? targetInfo.targetId : '';
+          if (!eventTargetId || !this.ownedTargetIds.has(eventTargetId)) return;
+        }
+        const eventTargetId = typeof params.targetId === 'string' ? params.targetId : '';
+        if (eventTargetId && !this.ownedTargetIds.has(eventTargetId)) return;
+        if (m.method === 'Target.targetDestroyed' && eventTargetId) this.ownedTargetIds.delete(eventTargetId);
+        const eventSessionId = typeof params.sessionId === 'string' ? params.sessionId : '';
+        if (m.method === 'Target.attachedToTarget' && eventSessionId) this.ownedSessionIds.add(eventSessionId);
+        if (m.method === 'Target.detachedFromTarget' && eventSessionId && !this.ownedSessionIds.has(eventSessionId)) return;
+        if (m.method === 'Target.detachedFromTarget' && eventSessionId) this.ownedSessionIds.delete(eventSessionId);
+      }
       for (const fn of this.eventListeners) {
         try { fn(m.method, m.params, m.sessionId); } catch { /* ignore */ }
       }
@@ -295,6 +393,19 @@ export class CdpError extends Error {
     super(`CDP ${code}: ${message}`);
     this.name = 'CdpError';
   }
+}
+
+export class CdpTimeoutError extends Error {
+  constructor(public method: string, public timeoutMs: number) {
+    super(`CDP call ${method} timed out after ${timeoutMs}ms`);
+    this.name = 'CdpTimeoutError';
+  }
+}
+
+function boundedTimeoutMs(value: number | string | undefined, fallback: number, min: number, max: number): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(parsed)));
 }
 
 /** Browser-level methods never take a sessionId. */
@@ -338,9 +449,10 @@ async function resolvePortEndpoint(opts: ConnectOptions): Promise<ResolvedEndpoi
   const port = Number(opts.port);
   if (!Number.isFinite(port)) throw new Error(`invalid CDP port: ${opts.port}`);
   const host = opts.host ?? '127.0.0.1';
+  const timeoutMs = boundedTimeoutMs(opts.timeoutMs, 5_000, 100, 30_000);
 
   try {
-    const version = await fetchJson<{ webSocketDebuggerUrl?: string }>(`http://${host}:${port}/json/version`);
+    const version = await fetchJson<{ webSocketDebuggerUrl?: string }>(`http://${host}:${port}/json/version`, timeoutMs);
     if (version.webSocketDebuggerUrl) return { wsUrl: version.webSocketDebuggerUrl };
   } catch {
     // Some Chromium builds only expose page endpoints. Fall through to /json/list.
@@ -348,6 +460,7 @@ async function resolvePortEndpoint(opts: ConnectOptions): Promise<ResolvedEndpoi
 
   const targets = await fetchJson<Array<{ id?: string; targetId?: string; type?: string; url?: string; webSocketDebuggerUrl?: string }>>(
     `http://${host}:${port}/json/list`,
+    timeoutMs,
   );
   const match = opts.targetId
     ? targets.find(t => t.id === opts.targetId || t.targetId === opts.targetId)
@@ -358,8 +471,8 @@ async function resolvePortEndpoint(opts: ConnectOptions): Promise<ResolvedEndpoi
   return { wsUrl: match.webSocketDebuggerUrl, scopedToTarget: true };
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+async function fetchJson<T>(url: string, timeoutMs: number): Promise<T> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok) throw new Error(`${url} returned HTTP ${res.status}`);
   return await res.json() as T;
 }
@@ -398,11 +511,42 @@ async function readDevToolsActivePort(profileDir: string): Promise<{ port: numbe
  * internals. Requires the session to be connected already.
  */
 export type PageTarget = { targetId: string; title: string; url: string; type: string };
-export async function listPageTargets(session: Session): Promise<PageTarget[]> {
-  const { targetInfos } = await session.domains.Target.getTargets({});
-  return (targetInfos as PageTarget[]).filter(
-    t => t.type === 'page' && !t.url.startsWith('chrome://') && !t.url.startsWith('devtools://')
+export function listPageTargets(session: Session): Promise<PageTarget[]> {
+  const request = session.domains.Target.getTargets({}).then(({ targetInfos }) => (
+    (targetInfos as PageTarget[]).filter(
+      t => t.type === 'page' && !t.url.startsWith('chrome://') && !t.url.startsWith('devtools://')
+    )
+  ));
+  return requireAwait(request, 'listPageTargets()');
+}
+
+/**
+ * Keep normal Promise/await behavior while making accidental synchronous use
+ * fail loudly instead of serializing a pending Promise as `{}` or `[]`.
+ */
+function requireAwait<T>(promise: Promise<T>, label: string): Promise<T> {
+  const misuse = (operation: PropertyKey) => new TypeError(
+    `${label} returns a Promise; use \`await ${label}\` before ${String(operation)}.`,
   );
+  // A misuse may throw before a caller can attach a rejection handler. Keep a
+  // side handler so a later CDP failure does not become an unhandled rejection;
+  // awaiting the original Promise still receives the rejection normally.
+  void promise.catch(() => {});
+  return new Proxy(promise, {
+    get(target, property) {
+      if (property === 'then' || property === 'catch' || property === 'finally') {
+        return target[property].bind(target);
+      }
+      if (property === Symbol.toStringTag) return 'Promise';
+      throw misuse(property);
+    },
+    ownKeys() {
+      throw misuse('enumerating its values');
+    },
+    getOwnPropertyDescriptor() {
+      throw misuse('reading its properties');
+    },
+  });
 }
 
 /**

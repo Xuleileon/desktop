@@ -35,6 +35,22 @@ done
 REPL="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)/repl.ts"
 
 LOG="${CDP_REPL_LOG:-/tmp/browser-harness-js.log}"
+PID_FILE="${CDP_REPL_PID_FILE:-$LOG.pid}"
+
+EVAL_TIMEOUT_MS="${CDP_EVAL_TIMEOUT_MS:-60000}"
+case "$EVAL_TIMEOUT_MS" in
+  ''|*[!0-9]*) EVAL_TIMEOUT_MS=60000 ;;
+esac
+if (( EVAL_TIMEOUT_MS < 100 || EVAL_TIMEOUT_MS > 120000 )); then
+  EVAL_TIMEOUT_MS=60000
+fi
+HTTP_TIMEOUT_SECONDS="${CDP_REPL_HTTP_TIMEOUT_SECONDS:-$(( (EVAL_TIMEOUT_MS + 999) / 1000 + 10 ))}"
+case "$HTTP_TIMEOUT_SECONDS" in
+  ''|*[!0-9]*) HTTP_TIMEOUT_SECONDS=70 ;;
+esac
+if (( HTTP_TIMEOUT_SECONDS < 2 || HTTP_TIMEOUT_SECONDS > 180 )); then
+  HTTP_TIMEOUT_SECONDS=70
+fi
 
 # Bootstrap bun if missing — the REPL server is Bun-native.
 ensure_bun() {
@@ -51,7 +67,7 @@ ensure_bun() {
     return 1
   fi
   echo "browser-harness-js: installing bun (one-time, from https://bun.sh/install)..." >&2
-  if ! curl -fsSL https://bun.sh/install | bash >&2; then
+  if ! curl -fsSL --connect-timeout 10 --max-time 120 https://bun.sh/install | bash >&2; then
     echo "browser-harness-js: bun install failed. Install manually from https://bun.sh, or set BROWSER_HARNESS_SKIP_BUN_INSTALL=1 to suppress this prompt." >&2
     return 1
   fi
@@ -63,18 +79,37 @@ ensure_bun() {
 }
 
 is_up() {
-  curl -fsS --max-time 1 "$URL/health" >/dev/null 2>&1
+  curl -fsS --connect-timeout 1 --max-time 1 "$URL/health" >/dev/null 2>&1
 }
 
 health_matches_owner() {
-  local health
-  health=$(curl -fsS --max-time 1 "$URL/health" 2>/dev/null) || return 1
+  local health max_time="${1:-1}"
+  health=$(curl -fsS --connect-timeout "$max_time" --max-time "$max_time" "$URL/health" 2>/dev/null) || return 1
   printf '%s' "$health" | grep -Fq "\"resourceSessionId\":\"$EXPECTED_SESSION\"" || return 1
   printf '%s' "$health" | grep -Fq "\"targetId\":\"$EXPECTED_TARGET\"" || return 1
 }
 
 ownership_error() {
   echo "browser-harness-js: REPL ownership mismatch on $URL; refusing to reuse another conversation's browser runtime." >&2
+}
+
+terminate_repl_process() {
+  local pid=""
+  if [ -f "$PID_FILE" ]; then
+    IFS= read -r pid < "$PID_FILE" || true
+  fi
+  case "$pid" in
+    ''|*[!0-9]*) rm -f "$PID_FILE"; return 0 ;;
+  esac
+  if kill -0 "$pid" >/dev/null 2>&1; then
+    kill "$pid" >/dev/null 2>&1 || true
+    for _ in $(seq 1 20); do
+      kill -0 "$pid" >/dev/null 2>&1 || break
+      sleep 0.05
+    done
+    kill -9 "$pid" >/dev/null 2>&1 || true
+  fi
+  rm -f "$PID_FILE"
 }
 
 start_repl() {
@@ -86,19 +121,29 @@ start_repl() {
   ensure_bun || return 1
   CDP_REPL_PORT="$PORT" BU_SESSION_ID="$EXPECTED_SESSION" BU_TARGET_ID="$EXPECTED_TARGET" \
     nohup bun "$REPL" "--resource-session=$EXPECTED_SESSION" "--resource-port=$PORT" >"$LOG" 2>&1 &
-  for _ in $(seq 1 100); do
+  printf '%s\n' "$!" > "$PID_FILE"
+  for _ in $(seq 1 40); do
     sleep 0.1
-    health_matches_owner && return 0
+    health_matches_owner 0.2 && return 0
   done
   echo "browser-harness-js: REPL failed to start on $URL (see $LOG)" >&2
+  terminate_repl_process
   return 1
 }
 
 post_eval() {
   # Capture body + status separately. Body goes to stdout (only if non-empty)
   # on 200; otherwise to stderr with non-zero exit.
-  local out status body
-  out=$(curl -sS -w '\n___STATUS___%{http_code}' --data-binary "$1" "$URL/eval")
+  local out status body curl_status
+  set +e
+  out=$(curl -sS --connect-timeout 2 --max-time "$HTTP_TIMEOUT_SECONDS" -w '\n___STATUS___%{http_code}' --data-binary "$1" "$URL/eval")
+  curl_status=$?
+  set -e
+  if [ "$curl_status" -ne 0 ]; then
+    echo "browser-harness-js: REPL request failed or timed out after ${HTTP_TIMEOUT_SECONDS}s; recycling the per-conversation REPL." >&2
+    terminate_repl_process
+    return 1
+  fi
   status="${out##*___STATUS___}"
   body="${out%$'\n'___STATUS___*}"
   if [ "$status" = "200" ]; then
@@ -106,6 +151,7 @@ post_eval() {
     return 0
   else
     [ -n "$body" ] && printf '%s\n' "$body" >&2
+    [ "$status" = "504" ] && terminate_repl_process
     return 1
   fi
 }
@@ -113,7 +159,7 @@ post_eval() {
 case "${1:-}" in
   --status)
     if health_matches_owner; then
-      curl -sS "$URL/health"; echo
+      curl -sS --connect-timeout 1 --max-time 2 "$URL/health"; echo
     elif is_up; then
       ownership_error
       echo '{"ok":false,"error":"ownership_mismatch"}'
@@ -125,11 +171,12 @@ case "${1:-}" in
     ;;
   --start)
     start_repl
-    curl -sS "$URL/health"; echo
+    curl -sS --connect-timeout 1 --max-time 2 "$URL/health"; echo
     ;;
   --stop)
     if health_matches_owner; then
-      curl -s -X POST "$URL/quit" >/dev/null || true
+      curl -s --connect-timeout 1 --max-time 2 -X POST "$URL/quit" >/dev/null || true
+      rm -f "$PID_FILE"
       echo '{"ok":true,"stopped":true}'
     elif is_up; then
       ownership_error
@@ -141,10 +188,11 @@ case "${1:-}" in
     ;;
   --restart)
     if is_up && ! health_matches_owner; then ownership_error; exit 1; fi
-    is_up && curl -s -X POST "$URL/quit" >/dev/null 2>&1 || true
+    is_up && curl -s --connect-timeout 1 --max-time 2 -X POST "$URL/quit" >/dev/null 2>&1 || true
+    rm -f "$PID_FILE"
     sleep 0.2
     start_repl
-    curl -sS "$URL/health"; echo
+    curl -sS --connect-timeout 1 --max-time 2 "$URL/health"; echo
     ;;
   --logs)
     exec tail -f "$LOG"

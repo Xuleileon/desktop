@@ -97,7 +97,6 @@ import { createTray, refreshTrayMenu } from './tray';
 // Track B — Pill + hotkeys
 import { createPillWindow, togglePill, showPill, hidePill, sendToPill, setPillHeight, PILL_HEIGHT_COLLAPSED, PILL_HEIGHT_EXPANDED } from './pill';
 import { createLogsWindow, attachToHub as attachLogsToHub, toggleLogs, hideLogs, getLogsWindow, showLogs, setLogsMode, updateLogsAnchor, focusLogsFollowUp } from './logsPill';
-import * as takeoverOverlay from './takeoverOverlay';
 import { sendSessionNotification } from './notifications';
 import { registerHotkeys, unregisterHotkeys, getGlobalCmdbarAccelerator, setGlobalCmdbarAccelerator } from './hotkeys';
 import { makeRequest, PROTOCOL_VERSION } from '../shared/types';
@@ -107,7 +106,7 @@ import type { HlEvent } from '../shared/session-schemas';
 import { AccountStore } from './identity/AccountStore';
 import { createOnboardingWindow } from './identity/onboardingWindow';
 import { registerOnboardingHandlers } from './identity/onboardingHandlers';
-import { windowsExplorerRevealSpec } from './windowsReveal';
+import { windowsExplorerOpenSpec } from './windowsReveal';
 import { loadBrowserCodeConfig } from './identity/authStore';
 import { registerApiKeyHandlers } from './settings/apiKeyIpc';
 import { registerConsentHandlers } from './consentIpc';
@@ -120,6 +119,7 @@ import { registerChromeImportHandlers } from './chrome-import/ipc';
 import { mainLogger } from './logger';
 import { registerRendererLogIpc } from './rendererLogIpc';
 import { createLocalTaskServer } from './localTaskServer';
+import { createAuthSyncServer } from './auth-sync/server';
 import {
   resolveUserDataDir,
   resolveCdpPort,
@@ -187,6 +187,8 @@ mainLogger.info('main.startup', {
   msg: `Remote debugging port set to ${resolvedCdp.port}`,
   cdpPort: resolvedCdp.port,
   cdpPortSource: resolvedCdp.source,
+  requestedCdpPort: resolvedCdp.requestedPort ?? null,
+  requestedCdpPortSource: resolvedCdp.requestedSource ?? null,
   userDataOverride: resolvedUserData.value,
   userDataSource: resolvedUserData.source,
   forceOnboarding: process.env.AGB_FORCE_ONBOARDING === '1',
@@ -227,7 +229,6 @@ browserPool.setOnGone((sessionId) => {
   if (shellWindow && !shellWindow.isDestroyed()) {
     shellWindow.webContents.send('sessions:browser-gone', sessionId);
   }
-  takeoverOverlay.hide(sessionId, shellWindow);
   // An idle session whose browser is gone has nothing left to do — promote
   // to 'stopped' so the UI stops showing "Idle" and renders the end state.
   sessionManager.markBrowserEnded(sessionId);
@@ -237,6 +238,11 @@ browserPool.setOnGone((sessionId) => {
 // any clicks the user makes inside the attached view.
 browserPool.setOnNavigate((sessionId, url) => {
   sessionManager.updateNavigationFromUrl(sessionId, url);
+});
+browserPool.setOnTabsChanged((sessionId, tabs) => {
+  if (shellWindow && !shellWindow.isDestroyed()) {
+    shellWindow.webContents.send('sessions:tabs-changed', sessionId, tabs);
+  }
 });
 browserPool.setOnInterruptShortcut((sessionId) => {
   return interruptBrowserSessionFromShortcut?.(sessionId) ?? false;
@@ -443,35 +449,60 @@ app.whenReady().then(async () => {
   // a stranger's browser — `/json/list` returns targets the agent has no
   // access to, and `/devtools/page/<id>` gives 404/403. Log loudly on
   // mismatch so users hit a clear error instead of mysterious CDP failures.
-  void (async () => {
-    let v = await verifyCdpOwnership(resolvedCdp.port, 2000, appBrowserIdentity.userAgent);
-    let attempts = 1;
-    while (!v.ok && !v.userAgent && attempts < 5) {
-      await new Promise((resolve) => setTimeout(resolve, attempts * 250));
-      attempts += 1;
-      v = await verifyCdpOwnership(resolvedCdp.port, 2000, appBrowserIdentity.userAgent);
-    }
-    if (v.ok) {
-      mainLogger.info('main.cdp.verified', {
-        port: resolvedCdp.port,
-        browser: v.browser,
-        userAgent: v.userAgent,
-        attempts,
+  let cdpVerification = await verifyCdpOwnership(resolvedCdp.port, 2000, appBrowserIdentity.userAgent);
+  let cdpVerificationAttempts = 1;
+  while (!cdpVerification.ok && !cdpVerification.userAgent && cdpVerificationAttempts < 5) {
+    await new Promise((resolve) => setTimeout(resolve, cdpVerificationAttempts * 250));
+    cdpVerificationAttempts += 1;
+    cdpVerification = await verifyCdpOwnership(resolvedCdp.port, 2000, appBrowserIdentity.userAgent);
+  }
+  const cdpStartupError = cdpVerification.ok
+    ? null
+    : cdpVerification.userAgent
+      ? `Browser automation is unavailable: port ${resolvedCdp.port} belongs to another Chromium process. Restart Browser Use Desktop.`
+      : `Browser automation is unavailable: Browser Use Desktop could not open its debugging port ${resolvedCdp.port}. Restart Browser Use Desktop.`;
+  if (cdpVerification.ok) {
+    mainLogger.info('main.cdp.verified', {
+      port: resolvedCdp.port,
+      browser: cdpVerification.browser,
+      userAgent: cdpVerification.userAgent,
+      attempts: cdpVerificationAttempts,
+    });
+  } else {
+    mainLogger.error('main.cdp.verifyFailed', {
+      port: resolvedCdp.port,
+      portSource: resolvedCdp.source,
+      browser: cdpVerification.browser ?? null,
+      userAgent: cdpVerification.userAgent ?? null,
+      error: cdpVerification.error ?? null,
+      attempts: cdpVerificationAttempts,
+      action: 'Task start is blocked so agents cannot receive a dead or foreign CDP endpoint.',
+    });
+  }
+
+  // The Chrome extension connects straight to this loopback receiver. Start
+  // it only after CDP ownership is proven so sync can never target a stale or
+  // foreign browser endpoint.
+  if (!cdpStartupError) {
+    try {
+      const authSyncServer = await createAuthSyncServer({
+        cdpDiscoveryUrl: `http://127.0.0.1:${resolvedCdp.port}/json/version`,
+        logger: mainLogger,
       });
-    } else {
-      mainLogger.error('main.cdp.verifyFailed', {
-        port: resolvedCdp.port,
-        portSource: resolvedCdp.source,
-        browser: v.browser ?? null,
-        userAgent: v.userAgent ?? null,
-        error: v.error ?? null,
-        attempts,
-        hint: v.userAgent
-          ? `CDP on :${resolvedCdp.port} responded with an unexpected User-Agent — another Chromium-based process likely owns this port. Close it (or pass --remote-debugging-port=<free port>) and restart.`
-          : `Could not reach CDP on :${resolvedCdp.port}; Electron may not have bound it (another process likely holds it).`,
+      app.once('before-quit', () => {
+        void authSyncServer.close().catch((err) => {
+          mainLogger.warn('main.authSyncServer.closeFailed', { error: (err as Error).message });
+        });
+      });
+    } catch (err) {
+      const error = err as NodeJS.ErrnoException;
+      mainLogger.error('main.authSyncServer.startFailed', {
+        code: error.code ?? null,
+        error: error.message,
+        action: 'Desktop will continue without extension auth sync; release the loopback auth-sync port and restart to reconnect.',
       });
     }
-  })();
+  }
 
   if (process.platform === 'darwin' && app.dock) {
     try {
@@ -895,7 +926,6 @@ app.whenReady().then(async () => {
 
     const result = sessionManager.pauseSession(id, opts);
     if (result.paused) {
-      takeoverOverlay.hide(id, shellWindow);
       captureEvent('session_paused', {
         engine: sessionManager.getSessionEngine(id) ?? 'unknown',
         source,
@@ -1030,6 +1060,7 @@ app.whenReady().then(async () => {
     source: 'resume' | 'queued-follow-up',
     externalRequestId?: string,
   ): Promise<{ resumed?: boolean; error?: string }> {
+    if (cdpStartupError) return { error: cdpStartupError };
     const currentSession = sessionManager.getSession(validatedId);
     if (!currentSession) return { error: 'Session not found' };
     if (currentSession.status !== 'idle' && currentSession.status !== 'paused' && currentSession.status !== 'stopped') {
@@ -1046,7 +1077,7 @@ app.whenReady().then(async () => {
       mainLogger.info('main.sessions:resume.persistedAttachments', { id: validatedId, turnIndex: attachmentTurnIndex, count: resumeAttachments.length, source });
     }
 
-    let webContents = browserPool.getWebContents(validatedId);
+    let webContents = browserPool.getRootWebContents(validatedId);
     if (!webContents) {
       const restoreUrl = restorableResumeUrl(currentSession.lastUrl);
       mainLogger.info('main.sessions:resume.recreateBrowser', {
@@ -1171,6 +1202,7 @@ app.whenReady().then(async () => {
     let view: ReturnType<typeof browserPool.create> | null = null;
 
     try {
+      if (cdpStartupError) throw new Error(cdpStartupError);
       const engineId = await assertSessionEngineReady(id);
       mainLogger.info('main.startSessionWithAgent.timing', { id, step: 'enginePreflight', ms: Date.now() - t0, engineId });
       const configuredModel = await stampConfiguredSessionModel(id, engineId, 'start');
@@ -1249,13 +1281,16 @@ app.whenReady().then(async () => {
     submitTask: async (payload) => {
       const validatedPrompt = assertString(payload.prompt, 'prompt', 10000);
       const engineId = payload.engine == null ? DEFAULT_ENGINE_ID : assertString(payload.engine, 'engine', 50);
+      const model = payload.model == null ? undefined : assertString(payload.model, 'model', 200).trim() || undefined;
       mainLogger.info('main.localTask.submit', {
         promptLength: validatedPrompt.length,
         engineId,
+        model: model ?? null,
       });
 
       const id = sessionManager.createSession(validatedPrompt);
       sessionManager.setSessionEngine(id, engineId);
+      if (model) sessionManager.setSessionModel(id, model);
       captureEvent('session_created', {
         source: 'local-task-server',
         engine: engineId,
@@ -1265,11 +1300,11 @@ app.whenReady().then(async () => {
 
       try {
         await startSessionWithAgent(id);
-        return { id, started: true, engine: engineId };
+        return { id, started: true, engine: engineId, ...(model ? { model } : {}) };
       } catch (err) {
         const error = (err as Error).message || 'Session start failed';
         mainLogger.warn('main.localTask.startFailed', { id, error });
-        return { id, started: false, engine: engineId, error };
+        return { id, started: false, engine: engineId, ...(model ? { model } : {}), error };
       }
     },
     followUpTask: async (payload) => {
@@ -1435,6 +1470,7 @@ app.whenReady().then(async () => {
 
     const session = sessionManager.getSession(validatedId);
     if (!session) return { error: 'Session not found' };
+    if (cdpStartupError) return { error: cdpStartupError };
 
     terminateActiveRunControl(validatedId);
     browserPool.destroy(validatedId, shellWindow ?? undefined);
@@ -1772,12 +1808,11 @@ app.whenReady().then(async () => {
     }
     if (process.platform === 'win32') {
       const explorerPath = path.join(process.env.SystemRoot || 'C:\\Windows', 'explorer.exe');
-      const revealSpec = windowsExplorerRevealSpec(resolvedPath, fs.statSync(resolvedPath).isDirectory());
+      const openSpec = windowsExplorerOpenSpec(resolvedPath, fs.statSync(resolvedPath).isDirectory());
       await new Promise<void>((resolve, reject) => {
-        const explorer = spawn(explorerPath, revealSpec.args, {
+        const explorer = spawn(explorerPath, openSpec.args, {
           detached: true,
           stdio: 'ignore',
-          windowsVerbatimArguments: revealSpec.windowsVerbatimArguments,
         });
         explorer.once('error', reject);
         explorer.once('spawn', () => {
@@ -1785,7 +1820,12 @@ app.whenReady().then(async () => {
           resolve();
         });
       });
-      mainLogger.info('main.sessions:reveal-output', { path: resolvedPath, platform: process.platform, mode: revealSpec.mode });
+      mainLogger.info('main.sessions:reveal-output', {
+        path: resolvedPath,
+        openPath: openSpec.openPath,
+        platform: process.platform,
+        mode: 'explorer-directory',
+      });
     } else {
       shell.showItemInFolder(resolvedPath);
       mainLogger.info('main.sessions:reveal-output', { path: resolvedPath, platform: process.platform, mode: 'select-file' });
@@ -1893,9 +1933,6 @@ app.whenReady().then(async () => {
           attachedView.webContents.focus();
         }
       }
-      // addChildView raises the browser view above any sibling we already
-      // have. Re-raise the takeover overlay so it stays on top.
-      takeoverOverlay.reraise(validatedId, shellWindow);
     }
     return ok;
   });
@@ -1904,32 +1941,7 @@ app.whenReady().then(async () => {
     const validatedId = assertString(id, 'id', 100);
     if (!shellWindow) return false;
     mainLogger.info('main.sessions:view-detach', { id: validatedId });
-    takeoverOverlay.hide(validatedId, shellWindow);
     return browserPool.detachFromWindow(validatedId, shellWindow);
-  });
-
-  // ---- Takeover overlay (pulsing glow + stop-and-take-over button) ----
-  ipcMain.handle('takeover:show', (_event, id: string, bounds: { x: number; y: number; width: number; height: number }, mode?: 'idle' | 'active') => {
-    const validatedId = assertString(id, 'id', 100);
-    if (!shellWindow) return;
-    takeoverOverlay.show(validatedId, shellWindow, bounds, mode ?? 'idle');
-    // The browser view was attached before us most of the time; reraise to
-    // guarantee our overlay paints above it.
-    takeoverOverlay.reraise(validatedId, shellWindow);
-  });
-
-  ipcMain.handle('takeover:hide', (_event, id: string) => {
-    const validatedId = assertString(id, 'id', 100);
-    takeoverOverlay.hide(validatedId, shellWindow);
-  });
-
-  ipcMain.handle('takeover:stop', (_event, id: string) => {
-    const validatedId = assertString(id, 'id', 100);
-    mainLogger.info('main.takeover:stop', { id: validatedId });
-    try { sessionManager.cancelSession(validatedId); } catch (err) {
-      mainLogger.warn('main.takeover:stop.cancelError', { id: validatedId, error: (err as Error).message });
-    }
-    takeoverOverlay.hide(validatedId, shellWindow);
   });
 
   // Fast path: fire-and-forget. Called on every frame during window resize /
@@ -1946,14 +1958,7 @@ app.whenReady().then(async () => {
       const ok = browserPool.attachToWindow(id, shellWindow, bounds);
       if (!ok) return;
     }
-    const fitted = browserPool.setViewBoundsFitted(id, bounds) ?? bounds;
-    // Keep takeover overlay tracking the browser rect and sitting above it.
-    // Use the fitted (centered) rect so the overlay aligns with the visible
-    // view, not the wider hub box.
-    if (takeoverOverlay.hasOverlay(id)) {
-      takeoverOverlay.updateBounds(id, fitted);
-      takeoverOverlay.reraise(id, shellWindow);
-    }
+    browserPool.setViewBoundsFitted(id, bounds);
   });
 
   ipcMain.handle('sessions:view-is-attached', (_event, id: string) => {
@@ -1969,13 +1974,31 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('sessions:views-detach-all', () => {
     if (!shellWindow) return;
-    takeoverOverlay.destroyAll(shellWindow);
     browserPool.detachAll(shellWindow);
   });
 
   ipcMain.handle('sessions:get-tabs', async (_event, id: string) => {
     const validatedId = assertString(id, 'id', 100);
     return browserPool.getTabs(validatedId);
+  });
+
+  ipcMain.handle('sessions:tab-activate', (_event, id: string, targetId: string) => {
+    const validatedId = assertString(id, 'id', 100);
+    const validatedTargetId = assertString(targetId, 'targetId', 100);
+    return browserPool.activatePage(validatedId, validatedTargetId);
+  });
+
+  ipcMain.handle('sessions:tab-close', (_event, id: string, targetId: string) => {
+    const validatedId = assertString(id, 'id', 100);
+    const validatedTargetId = assertString(targetId, 'targetId', 100);
+    return browserPool.closePage(validatedId, validatedTargetId);
+  });
+
+  ipcMain.handle('sessions:tab-pin', (_event, id: string, targetId: string, pinned: boolean) => {
+    const validatedId = assertString(id, 'id', 100);
+    const validatedTargetId = assertString(targetId, 'targetId', 100);
+    if (typeof pinned !== 'boolean') throw new TypeError('pinned must be a boolean');
+    return browserPool.setPagePinned(validatedId, validatedTargetId, pinned);
   });
 
   ipcMain.handle('sessions:pool-stats', () => {

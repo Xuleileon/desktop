@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { BrowserWindow } from 'electron';
-import { BrowserPool, isSafeTopLevelUrl } from '../../../src/main/sessions/BrowserPool';
+import { BrowserPool, browserSpacePartition, isSafeTopLevelUrl } from '../../../src/main/sessions/BrowserPool';
 import { contentViewStub } from '../../fixtures/electron-mock';
 
 type MockWindow = {
@@ -10,6 +10,39 @@ type MockWindow = {
     removeChildView: (view: unknown) => void;
   };
 };
+
+type MockWebContents = {
+  id: number;
+  emit: (event: string, ...args: unknown[]) => boolean;
+  destroy: () => void;
+  isDestroyed: () => boolean;
+  setMockTitle: (title: string) => void;
+  setMockBeforeUnloadBlocked: (blocked: boolean) => void;
+  invokeWindowOpenHandler: (url: string) => {
+    action: 'allow' | 'deny';
+    createWindow?: (options: Record<string, unknown>) => MockWebContents;
+  } | null;
+};
+
+function mockWebContents(view: NonNullable<ReturnType<BrowserPool['create']>>): MockWebContents {
+  return view.webContents as unknown as MockWebContents;
+}
+
+function openManagedPage(
+  opener: MockWebContents,
+  url: string,
+): { action: 'allow' | 'deny'; page?: MockWebContents } {
+  const response = opener.invokeWindowOpenHandler(url);
+  if (!response || response.action === 'deny') return { action: 'deny' };
+  return {
+    action: 'allow',
+    page: response.createWindow!({ webPreferences: {} }),
+  };
+}
+
+async function flushImmediate(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
 
 function mockWindow(): BrowserWindow & MockWindow {
   const children: unknown[] = [];
@@ -166,6 +199,65 @@ describe('BrowserPool — creation', () => {
     expect(preventDefault).toHaveBeenCalledOnce();
     expect(isSafeTopLevelUrl('https://www.douyin.com/')).toBe(true);
     expect(isSafeTopLevelUrl('bitbrowser://open/client')).toBe(false);
+  });
+
+  it('assigns a stable isolated persistent Profile to each conversation Space', () => {
+    expect(browserSpacePartition('s1')).toBe(browserSpacePartition('s1'));
+    expect(browserSpacePartition('s1')).not.toBe(browserSpacePartition('s2'));
+    expect(browserSpacePartition('s1')).toMatch(/^persist:browser-use-space-/);
+  });
+
+  it('keeps a safe window.open URL as a second managed page in the owning Space', async () => {
+    const view = pool.create('s1');
+    const wc = view!.webContents as unknown as {
+      invokeWindowOpenHandler: (url: string) => {
+        action: 'allow' | 'deny';
+        createWindow?: (options: Record<string, unknown>) => { id: number };
+      } | null;
+    };
+
+    const response = wc.invokeWindowOpenHandler('https://atourgroup.feishu.cn/base/example');
+    expect(response?.action).toBe('allow');
+    expect(response?.createWindow).toBeTypeOf('function');
+    const popup = response!.createWindow!({ webPreferences: {} });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(popup.id).not.toBe(view!.webContents.id);
+    expect(await pool.getTabs('s1')).toHaveLength(2);
+    expect(pool.getWebContents('s1')?.id).toBe(popup.id);
+    expect(pool.getRootWebContents('s1')?.id).toBe(view!.webContents.id);
+  });
+
+  it('keeps a script-driven about:blank popup as a managed Space page', async () => {
+    const view = pool.create('s1');
+    const wc = view!.webContents as unknown as {
+      invokeWindowOpenHandler: (url: string) => {
+        action: 'allow' | 'deny';
+        createWindow?: (options: Record<string, unknown>) => {
+          id: number;
+          emit: (event: string, ...args: unknown[]) => boolean;
+        };
+      } | null;
+    };
+
+    const response = wc.invokeWindowOpenHandler('about:blank');
+    expect(response?.action).toBe('allow');
+    expect(response?.createWindow).toBeTypeOf('function');
+
+    const bridge = response!.createWindow!({ webPreferences: {} });
+    bridge.emit(
+      'did-start-navigation',
+      {},
+      'https://atourgroup.feishu.cn/base/script-driven-destination',
+      false,
+      true,
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const tabs = await pool.getTabs('s1');
+    expect(tabs).toHaveLength(2);
+    expect(tabs.filter((tab) => tab.active)).toHaveLength(1);
+    expect(pool.getWebContents('s1')?.id).toBe(bridge.id);
   });
 });
 
@@ -362,6 +454,342 @@ describe('BrowserPool — getTabs', () => {
   it('returns empty array for unknown session', async () => {
     const tabs = await pool.getTabs('nonexistent');
     expect(tabs).toEqual([]);
+  });
+});
+
+describe('BrowserPool — managed page controls and tab events', () => {
+  let pool: BrowserPool;
+
+  beforeEach(() => { pool = new BrowserPool(5); });
+  afterEach(() => { pool.destroyAll(); });
+
+  it('publishes tab changes and supports activate, pin, and close without allowing the root page to close', async () => {
+    const rootView = pool.create('s1');
+    expect(rootView).not.toBeNull();
+    const root = mockWebContents(rootView!);
+    const snapshots: Awaited<ReturnType<BrowserPool['getTabs']>>[] = [];
+    pool.setOnTabsChanged((_sessionId, tabs) => snapshots.push(tabs));
+
+    const opened = openManagedPage(root, 'https://example.com/report');
+    expect(opened.action).toBe('allow');
+    const popup = opened.page!;
+    await flushImmediate();
+
+    expect(snapshots.some((tabs) => tabs.length === 2)).toBe(true);
+    expect(pool.getWebContents('s1')?.id).toBe(popup.id);
+
+    popup.setMockTitle('Quarterly report');
+    expect(snapshots.at(-1)?.find((tab) => tab.targetId === String(popup.id))?.title).toBe('Quarterly report');
+
+    expect(pool.setPagePinned('s1', String(popup.id), true)).toEqual({ pinned: true });
+    expect((await pool.getTabs('s1')).find((tab) => tab.targetId === String(popup.id))?.pinned).toBe(true);
+
+    expect(pool.activatePage('s1', String(root.id))).toEqual({ activated: true });
+    expect(pool.getWebContents('s1')?.id).toBe(root.id);
+    expect((await pool.getTabs('s1')).find((tab) => tab.targetId === String(root.id))?.active).toBe(true);
+
+    expect(await pool.closePage('s1', String(popup.id))).toEqual({ closed: true });
+    expect(popup.isDestroyed()).toBe(true);
+    expect(await pool.getTabs('s1')).toHaveLength(1);
+    expect(snapshots.at(-1)).toHaveLength(1);
+
+    expect(await pool.closePage('s1', String(root.id))).toEqual({ closed: false, reason: 'root_protected' });
+    expect(pool.setPagePinned('s1', String(root.id), true)).toEqual({
+      pinned: false,
+      reason: 'root_always_protected',
+    });
+    expect(root.isDestroyed()).toBe(false);
+  });
+});
+
+describe('BrowserPool — duplicate window.open idempotency', () => {
+  let pool: BrowserPool;
+
+  beforeEach(() => { pool = new BrowserPool(5); });
+  afterEach(() => { pool.destroyAll(); });
+
+  it('reuses and activates a recent page from the same opener after removing volatile query parameters', async () => {
+    const rootView = pool.create('s1');
+    const root = mockWebContents(rootView!);
+    const first = openManagedPage(
+      root,
+      'http://oa.yaduo.com/spa/workflow/static4form/index.html?_rdm=100&tenant=atour#/main/workflow/req?workflowid=1169&_key=first&iscreate=1',
+    );
+    expect(first.action).toBe('allow');
+    await flushImmediate();
+    expect(pool.activatePage('s1', String(root.id))).toEqual({ activated: true });
+
+    const duplicate = openManagedPage(
+      root,
+      'http://oa.yaduo.com/spa/workflow/static4form/index.html?_rdm=200&tenant=atour#/main/workflow/req?workflowid=1169&_key=second&iscreate=1',
+    );
+    await flushImmediate();
+
+    expect(duplicate).toEqual({ action: 'deny' });
+    expect(await pool.getTabs('s1')).toHaveLength(2);
+    expect(pool.getWebContents('s1')?.id).toBe(first.page!.id);
+  });
+
+  it('keeps different stable business parameters as separate pages', async () => {
+    const rootView = pool.create('s1');
+    const root = mockWebContents(rootView!);
+    const first = openManagedPage(
+      root,
+      'https://oa.example.test/form?_rdm=100#/request?workflowid=1169&_key=one&iscreate=1',
+    );
+    const second = openManagedPage(
+      root,
+      'https://oa.example.test/form?_rdm=200#/request?workflowid=1170&_key=two&iscreate=1',
+    );
+    await flushImmediate();
+
+    expect(first.action).toBe('allow');
+    expect(second.action).toBe('allow');
+    expect(await pool.getTabs('s1')).toHaveLength(3);
+  });
+
+  it('allows the same canonical URL again after the reuse window expires', async () => {
+    const now = vi.spyOn(Date, 'now');
+    let currentTime = new Date('2026-08-27T05:00:00.000Z').getTime();
+    now.mockImplementation(() => currentTime);
+    const timedPool = new BrowserPool(5, { duplicateWindowOpenReuseMs: 1_000 });
+    try {
+      const rootView = timedPool.create('s1');
+      const root = mockWebContents(rootView!);
+      const first = openManagedPage(root, 'https://oa.example.test/form?_rdm=100#/request?workflowid=1169&_key=one');
+      await flushImmediate();
+
+      currentTime += 1_001;
+      const later = openManagedPage(root, 'https://oa.example.test/form?_rdm=200#/request?workflowid=1169&_key=two');
+      await flushImmediate();
+
+      expect(first.action).toBe('allow');
+      expect(later.action).toBe('allow');
+      expect(await timedPool.getTabs('s1')).toHaveLength(3);
+    } finally {
+      timedPool.destroyAll();
+      now.mockRestore();
+    }
+  });
+
+  it('never deduplicates about:blank popups', async () => {
+    const rootView = pool.create('s1');
+    const root = mockWebContents(rootView!);
+
+    const first = openManagedPage(root, 'about:blank');
+    const second = openManagedPage(root, 'about:blank');
+    await flushImmediate();
+
+    expect(first.action).toBe('allow');
+    expect(second.action).toBe('allow');
+    expect(await pool.getTabs('s1')).toHaveLength(3);
+  });
+
+  it('does not merge matching URLs opened by different managed pages', async () => {
+    const rootView = pool.create('s1');
+    const root = mockWebContents(rootView!);
+    const url = 'https://oa.example.test/form?_rdm=100#/request?workflowid=1169&_key=one';
+    const first = openManagedPage(root, url);
+    expect(first.action).toBe('allow');
+    await flushImmediate();
+
+    const fromChild = openManagedPage(
+      first.page!,
+      'https://oa.example.test/form?_rdm=200#/request?workflowid=1169&_key=two',
+    );
+    await flushImmediate();
+
+    expect(fromChild.action).toBe('allow');
+    expect(await pool.getTabs('s1')).toHaveLength(3);
+  });
+});
+
+describe('BrowserPool — page limit and protected pages', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-27T00:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('closes the least-recently-used inactive child and preserves the root and current page', async () => {
+    const pool = new BrowserPool(5, { maxPagesPerSpace: 4 });
+    try {
+      const rootView = pool.create('s1');
+      const root = mockWebContents(rootView!);
+
+      vi.setSystemTime(new Date('2026-08-27T00:00:01.000Z'));
+      const first = openManagedPage(root, 'https://example.com/first').page!;
+      await vi.runAllTimersAsync();
+      vi.setSystemTime(new Date('2026-08-27T00:00:02.000Z'));
+      const second = openManagedPage(root, 'https://example.com/second').page!;
+      await vi.runAllTimersAsync();
+      vi.setSystemTime(new Date('2026-08-27T00:00:03.000Z'));
+      const current = openManagedPage(root, 'https://example.com/current').page!;
+      await vi.runAllTimersAsync();
+
+      expect(pool.getWebContents('s1')?.id).toBe(current.id);
+      vi.setSystemTime(new Date('2026-08-27T00:00:04.000Z'));
+      const overflow = openManagedPage(root, 'https://example.com/overflow');
+      expect(overflow.action).toBe('allow');
+      await vi.runAllTimersAsync();
+
+      expect(first.isDestroyed()).toBe(true);
+      expect(second.isDestroyed()).toBe(false);
+      expect(current.isDestroyed()).toBe(false);
+      expect(root.isDestroyed()).toBe(false);
+      expect(await pool.getTabs('s1')).toHaveLength(4);
+    } finally {
+      pool.destroyAll();
+    }
+  });
+
+  it('refuses a new page when the only inactive child is pinned and root/current are protected', async () => {
+    const pool = new BrowserPool(5, { maxPagesPerSpace: 3 });
+    try {
+      const rootView = pool.create('s1');
+      const root = mockWebContents(rootView!);
+      const pinned = openManagedPage(root, 'https://example.com/pinned').page!;
+      await vi.runAllTimersAsync();
+      const current = openManagedPage(root, 'https://example.com/current').page!;
+      await vi.runAllTimersAsync();
+      expect(pool.setPagePinned('s1', String(pinned.id), true)).toEqual({ pinned: true });
+
+      const blocked = openManagedPage(root, 'https://example.com/blocked');
+
+      expect(blocked).toEqual({ action: 'deny' });
+      expect(root.isDestroyed()).toBe(false);
+      expect(pinned.isDestroyed()).toBe(false);
+      expect(current.isDestroyed()).toBe(false);
+      expect(pool.getWebContents('s1')?.id).toBe(current.id);
+      expect(await pool.getTabs('s1')).toHaveLength(3);
+    } finally {
+      pool.destroyAll();
+    }
+  });
+
+  it('honors beforeunload for a user close and restores the vetoed page as active', async () => {
+    const pool = new BrowserPool(5, { maxPagesPerSpace: 3 });
+    try {
+      const rootView = pool.create('s1');
+      const root = mockWebContents(rootView!);
+      const popup = openManagedPage(root, 'https://example.com/unsaved-form').page!;
+      await vi.runAllTimersAsync();
+      popup.setMockBeforeUnloadBlocked(true);
+
+      const closeResult = pool.closePage('s1', String(popup.id));
+      await vi.advanceTimersByTimeAsync(1_500);
+
+      expect(await closeResult).toEqual({ closed: false, reason: 'beforeunload_blocked' });
+      expect(popup.isDestroyed()).toBe(false);
+      expect(pool.getWebContents('s1')?.id).toBe(popup.id);
+      expect(root.isDestroyed()).toBe(false);
+      expect(await pool.getTabs('s1')).toHaveLength(2);
+    } finally {
+      pool.destroyAll();
+    }
+  });
+
+  it('does not discard an unsaved inactive page during automatic LRU cleanup', async () => {
+    const pool = new BrowserPool(5, { maxPagesPerSpace: 3 });
+    try {
+      const rootView = pool.create('s1');
+      const root = mockWebContents(rootView!);
+      const protectedPage = openManagedPage(root, 'https://example.com/unsaved').page!;
+      await vi.runAllTimersAsync();
+      protectedPage.setMockBeforeUnloadBlocked(true);
+      const replaceablePage = openManagedPage(root, 'https://example.com/replaceable').page!;
+      await vi.runAllTimersAsync();
+
+      const overflow = openManagedPage(root, 'https://example.com/overflow');
+      expect(overflow.action).toBe('allow');
+      await vi.runAllTimersAsync();
+
+      expect(protectedPage.isDestroyed()).toBe(false);
+      expect(replaceablePage.isDestroyed()).toBe(true);
+      expect(root.isDestroyed()).toBe(false);
+      expect((await pool.getTabs('s1')).some((tab) => tab.targetId === String(protectedPage.id))).toBe(true);
+      expect(await pool.getTabs('s1')).toHaveLength(3);
+    } finally {
+      pool.destroyAll();
+    }
+  });
+});
+
+describe('BrowserPool — completed task cleanup', () => {
+  let pool: BrowserPool;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    pool = new BrowserPool(5, {
+      idleFreezeDelayMs: 60_000,
+      completedPageCleanupDelayMs: 100,
+    });
+  });
+
+  afterEach(() => {
+    pool.destroyAll();
+    vi.useRealTimers();
+  });
+
+  it('closes inactive unpinned child pages after the completed-task retention delay', async () => {
+    const rootView = pool.create('s1');
+    const root = mockWebContents(rootView!);
+    const inactive = openManagedPage(root, 'https://example.com/result-one').page!;
+    await vi.runOnlyPendingTimersAsync();
+    const current = openManagedPage(root, 'https://example.com/result-two').page!;
+    await vi.runOnlyPendingTimersAsync();
+
+    pool.markSessionIdle('s1');
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(inactive.isDestroyed()).toBe(true);
+    expect(current.isDestroyed()).toBe(false);
+    expect(root.isDestroyed()).toBe(false);
+    expect(await pool.getTabs('s1')).toHaveLength(2);
+  });
+
+  it('cancels delayed cleanup when the task resumes', async () => {
+    const rootView = pool.create('s1');
+    const root = mockWebContents(rootView!);
+    const inactive = openManagedPage(root, 'https://example.com/result-one').page!;
+    await vi.runOnlyPendingTimersAsync();
+    const current = openManagedPage(root, 'https://example.com/result-two').page!;
+    await vi.runOnlyPendingTimersAsync();
+
+    pool.markSessionIdle('s1');
+    await vi.advanceTimersByTimeAsync(99);
+    await pool.markSessionActive('s1');
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(inactive.isDestroyed()).toBe(false);
+    expect(current.isDestroyed()).toBe(false);
+    expect(await pool.getTabs('s1')).toHaveLength(3);
+  });
+});
+
+describe('BrowserPool — Space ownership cleanup', () => {
+  let pool: BrowserPool;
+
+  beforeEach(() => { pool = new BrowserPool(5); });
+  afterEach(() => { pool.destroyAll(); });
+
+  it('tears down every child page when the root page is destroyed unexpectedly', async () => {
+    const rootView = pool.create('s1');
+    const root = mockWebContents(rootView!);
+    const first = openManagedPage(root, 'https://example.com/first').page!;
+    const second = openManagedPage(root, 'https://example.com/second').page!;
+    await flushImmediate();
+
+    root.destroy();
+    await flushImmediate();
+
+    expect(pool.activeCount).toBe(0);
+    expect(pool.getWebContents('s1')).toBeNull();
+    expect(first.isDestroyed()).toBe(true);
+    expect(second.isDestroyed()).toBe(true);
   });
 });
 

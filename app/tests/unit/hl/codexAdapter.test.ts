@@ -92,6 +92,8 @@ describe('codex adapter spawn args', () => {
 
     expect(wrappedPrompt).toContain('likely to repeat, long-running enough to justify reuse, or generally applicable');
     expect(wrappedPrompt).toContain('Do not write skills for one-off facts/calculations');
+    expect(wrappedPrompt).toContain('always use `await listPageTargets()`');
+    expect(wrappedPrompt).toContain('Whole-page text');
   });
 
   it('passes the selected model and ignores user MCP config in lean mode', () => {

@@ -12,6 +12,7 @@ import { useThemedAsset } from '../design/useThemedAsset';
 import { closeAppPopup, openAnchoredAppPopup } from '../shared/appPopup';
 import type { AgentSession, OutputEntry } from './types';
 import { useI18n } from './i18n';
+import { BrowserTabStrip } from './BrowserTabStrip';
 
 function formatElapsed(createdAt: number): string {
   const seconds = Math.floor((Date.now() - createdAt) / 1000);
@@ -723,17 +724,19 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
   // agent's stream as soon as a task starts.
   const autoLogsTriggeredRef = useRef<Set<string>>(new Set());
   const computeBounds = useCallback((): { x: number; y: number; width: number; height: number; slotWidth: number } | null => {
-    const el = paneRef.current?.querySelector('.pane__output') as HTMLElement | null;
+    const el = paneRef.current?.querySelector('.pane__browser-viewport') as HTMLElement | null;
     if (!el) return null;
     const rect = el.getBoundingClientRect();
     const fullWidth = Math.round(rect.width);
+    const fullHeight = Math.round(rect.height);
     const slotWidth = fullWidth;
     const border = 1;
+    if (fullWidth <= border * 2 || fullHeight <= border * 2) return null;
     return {
       x: Math.round(rect.x) + border,
       y: Math.round(rect.y) + border,
       width: slotWidth - border * 2,
-      height: Math.round(rect.height) - border * 2,
+      height: fullHeight - border * 2,
       slotWidth,
     };
   }, []);
@@ -759,7 +762,7 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
         console.log('[AgentPane] browser-gone signal', { id });
         setBrowserDead(true);
         // Keep frameRect — the "Browser ended" overlay needs it to paint.
-        // Without it the empty .pane__output area shows as black with no label.
+        // Without it the empty browser viewport shows as black with no label.
       }
     });
     return off;
@@ -768,7 +771,7 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
   const handleToggleLogs = useCallback(() => {
     const api = window.electronAPI;
     if (!api?.logs) return;
-    const outEl = paneRef.current?.querySelector('.pane__output') as HTMLElement | null;
+    const outEl = paneRef.current?.querySelector('.pane__browser-viewport') as HTMLElement | null;
     const rect = outEl?.getBoundingClientRect();
     const anchor = rect
       ? { x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) }
@@ -786,7 +789,7 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
     if (session.status === 'draft') return;
     const api = window.electronAPI;
     if (!api?.logs?.show) return;
-    const outEl = paneRef.current?.querySelector('.pane__output') as HTMLElement | null;
+    const outEl = paneRef.current?.querySelector('.pane__browser-viewport') as HTMLElement | null;
     const rect = outEl?.getBoundingClientRect();
     if (!rect || rect.width <= 0 || rect.height <= 0) return;
     const anchor = {
@@ -802,69 +805,46 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
   useEffect(() => {
     const paneEl = paneRef.current;
     if (!paneEl) return;
+    const viewportEl = paneEl.querySelector('.pane__browser-viewport') as HTMLElement | null;
+    if (!viewportEl) return;
     const api = window.electronAPI;
     if (!api) return;
     if (browserDead && !session.hasBrowser) {
       // Dead browser — ensure any lingering view is detached.
       // Keep frameRect so the "Browser ended" overlay can paint over the
-      // pane__output slot; nulling it leaves the pane black with no label.
+      // browser viewport; nulling it leaves the pane black with no label.
       api.sessions.viewDetach(session.id).catch(() => {});
       return;
     }
 
     let lastKey = '';
     let hasAttached = false;
-    // Tracks whether the last viewAttach actually got a browser view. If
-    // false, we skip the takeover overlay — the session is broken/deleted.
-    let attachSucceeded = false;
     let rafScheduled = 0;
     const applyBounds = () => {
       rafScheduled = 0;
-      const outEl = paneEl.querySelector('.pane__output') as HTMLElement | null;
-      if (!outEl) return;
       const computed = computeBounds();
       if (!computed) return;
       const { slotWidth, ...bounds } = computed;
       const key = `${bounds.x}|${bounds.y}|${bounds.width}|${bounds.height}`;
       if (key === lastKey) return;
       lastKey = key;
-      // Overlay is always visible while the session is running. Mode switches
-      // from 'idle' (plain "Browser not started yet" label) to 'active'
-      // (pulsing glow + hover-to-stop button) the moment SessionManager
-      // records a real navigation via session.primarySite. The ambiguous
-      // idle label covers both chat-only tasks and browser tasks still
-      // warming up.
-      const overlayMode: 'idle' | 'active' = session.primarySite ? 'active' : 'idle';
-
       if (!hasAttached) {
         hasAttached = true;
         api.sessions.viewAttach(session.id, bounds).then((ok) => {
           if (!ok) {
-            attachSucceeded = false;
             setBrowserMissing(true);
-            api.takeover?.hide(session.id).catch(() => {});
           } else {
-            attachSucceeded = true;
             setBrowserDead(false);
             setBrowserMissing(false);
-            if (session.status === 'running') {
-              void api.takeover?.show(session.id, bounds, overlayMode);
-            }
           }
         }).catch(() => {
           hasAttached = false;
-          attachSucceeded = false;
         });
       } else {
         api.sessions.viewResize(session.id, bounds);
-        if (attachSucceeded && session.status === 'running') {
-          void api.takeover?.show(session.id, bounds, overlayMode);
-        } else {
-          api.takeover?.hide(session.id).catch(() => {});
-        }
       }
       const p = paneEl.getBoundingClientRect();
-      const o = outEl.getBoundingClientRect();
+      const o = viewportEl.getBoundingClientRect();
       setFrameRect({
         left: Math.round(o.left - p.left),
         top: Math.round(o.top - p.top),
@@ -902,6 +882,7 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
 
     const observer = new ResizeObserver(updateBounds);
     observer.observe(paneEl, { box: 'border-box' });
+    observer.observe(viewportEl, { box: 'border-box' });
 
     // ResizeObserver misses position-only changes (e.g. sibling pane dismissed
     // causes a grid reflow without this pane resizing). HubApp dispatches
@@ -926,7 +907,7 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
       window.removeEventListener('pane:layout-change', onLayoutChange);
       if (rafScheduled) cancelAnimationFrame(rafScheduled);
     };
-  }, [session.id, computeBounds, browserDead, session.hasBrowser, session.status, session.primarySite]);
+  }, [session.id, computeBounds, browserDead, session.hasBrowser, session.status]);
 
   useEffect(() => {
     if (pendingUnmountDetachRef.current !== null) {
@@ -943,26 +924,13 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
         pendingUnmountDetachRef.current = null;
         if (shouldDetachBrowserOnUnmount && !shouldDetachBrowserOnUnmount()) {
           console.log('[AgentPane] unmount -> keep browser parked offscreen', { id: sessionId });
-          api.takeover?.hide(sessionId).catch(() => {});
           return;
         }
         console.log('[AgentPane] unmount -> detach', { id: sessionId });
         api.sessions.viewDetach(sessionId).catch(() => {});
-        api.takeover?.hide(sessionId).catch(() => {});
       }, 0);
     };
   }, [session.id, shouldDetachBrowserOnUnmount]);
-
-  // Hide the takeover overlay whenever the session leaves 'running' state.
-  // Show is driven by the bounds-update effect above so it tracks the same
-  // rect as the browser view without a separate measurement path.
-  useEffect(() => {
-    const api = window.electronAPI;
-    if (!api?.takeover) return;
-    if (session.status !== 'running') {
-      void api.takeover.hide(session.id);
-    }
-  }, [session.id, session.status]);
 
   const elapsed = formatElapsed(session.createdAt);
   const statusText = tr(STATUS_LABEL[session.status] ?? session.status, {
@@ -1237,9 +1205,14 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
           </div>
         );
       })()}
-      <div
-        className="pane__output"
-      />
+      <div className="pane__browser-shell">
+        <BrowserTabStrip
+          sessionId={session.id}
+          running={session.status === 'running' || session.status === 'stuck'}
+          onTakeOver={onPause ? () => onPause(session.id) : undefined}
+        />
+        <div className="pane__browser-viewport" />
+      </div>
 
     </div>
   );

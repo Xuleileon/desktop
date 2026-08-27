@@ -66,6 +66,10 @@ describe('bootstrapHarness browser-harness-js materialization', () => {
     // extensionless bash file.
     expect(fs.existsSync(cliCmd)).toBe(true);
     expect(fs.readFileSync(cliCmd, 'utf-8')).toContain('bash.exe');
+    const cliSource = fs.readFileSync(cli, 'utf-8');
+    expect(cliSource).toContain('--max-time "$HTTP_TIMEOUT_SECONDS"');
+    expect(cliSource).toContain('terminate_repl_process');
+    expect(cliSource).toContain('PID_FILE=');
     expect(fs.existsSync(path.join(interactionSkillsDir(), 'screenshots.md'))).toBe(true);
     // Executable-bit assert: skipped on Windows because NTFS permission
     // mapping doesn't expose POSIX exec bits the way the test asserts.

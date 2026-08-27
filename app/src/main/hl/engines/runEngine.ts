@@ -8,7 +8,7 @@
  */
 
 import { spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { engineLogger } from '../../logger';
@@ -234,6 +234,11 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
     prompt: opts.prompt,
     harnessDir: opts.harnessDir,
     sessionId: opts.sessionId,
+    // The Desktop session id names durable app resources and intentionally
+    // survives reruns. Provider conversation ids must not: a fresh spawn must
+    // never reopen an old provider transcript just because the UI resource id
+    // stayed the same.
+    providerSessionId: randomUUID(),
     targetId,
     cdpPort: opts.cdpPort,
     resumeSessionId: opts.resumeSessionId,
@@ -246,6 +251,40 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
   const wrappedPrompt = adapter.wrapPrompt(spawnCtx);
   const args = adapter.buildSpawnArgs(spawnCtx, wrappedPrompt);
   const env = adapter.buildEnv(spawnCtx, { ...process.env });
+
+  // browser-harness-js intentionally survives individual CLI calls so one
+  // agent can reuse its CDP session. It must not survive the owning engine
+  // run, however: a rerun of the same Desktop session gets a new resource
+  // port and would otherwise leave duplicate Bun REPLs behind indefinitely.
+  const stopOwnedHarnessRepl = async (): Promise<void> => {
+    const rawPort = env.CDP_REPL_PORT;
+    if (!rawPort || !/^\d+$/u.test(rawPort)) return;
+    const baseUrl = `http://127.0.0.1:${rawPort}`;
+    try {
+      const healthResponse = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(750) });
+      if (!healthResponse.ok) return;
+      const health = await healthResponse.json() as { resourceSessionId?: string };
+      if (health.resourceSessionId !== opts.sessionId) {
+        engineLogger.warn('engines.run.harnessCleanup.ownerMismatch', {
+          sessionId: opts.sessionId,
+          resourceSessionId: health.resourceSessionId ?? null,
+          port: Number(rawPort),
+        });
+        return;
+      }
+      await fetch(`${baseUrl}/quit`, { method: 'POST', signal: AbortSignal.timeout(750) });
+      const pidFile = env.CDP_REPL_PID_FILE ?? `${env.CDP_REPL_LOG ?? ''}.pid`;
+      if (pidFile && pidFile !== '.pid') {
+        try { fs.unlinkSync(pidFile); } catch { /* already gone */ }
+      }
+      engineLogger.info('engines.run.harnessCleanup.stopped', {
+        sessionId: opts.sessionId,
+        port: Number(rawPort),
+      });
+    } catch {
+      // No REPL was launched, or it already exited. Both are clean states.
+    }
+  };
 
   engineLogger.info('engines.run.spawn', {
     engineId: adapter.id,
@@ -737,7 +776,7 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
   });
 
   await new Promise<void>((resolve) => {
-    child.on('close', (code, sig) => {
+    child.on('close', async (code, sig) => {
       controlState = 'terminated';
       unregisterResourceOwner(child.pid);
       opts.signal?.removeEventListener('abort', onAbort);
@@ -745,6 +784,7 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
       flushHarnessChanges();
       flushOutputs();
       closeWatchers();
+      await stopOwnedHarnessRepl();
       engineLogger.info('engines.run.exit', {
         engineId: adapter.id,
         code,
@@ -771,7 +811,7 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
       }
       resolve();
     });
-    child.on('error', (err) => {
+    child.on('error', async (err) => {
       controlState = 'terminated';
       unregisterResourceOwner(child.pid);
       opts.signal?.removeEventListener('abort', onAbort);
@@ -779,6 +819,7 @@ export async function runEngine(opts: RunEngineOptions): Promise<void> {
       flushHarnessChanges();
       flushOutputs();
       closeWatchers();
+      await stopOwnedHarnessRepl();
       opts.onEvent({ type: 'error', message: `${adapter.id}_spawn_error: ${err.message}` });
       resolve();
     });

@@ -8,6 +8,7 @@ export const LOCAL_TASK_CONTROL_FILE = 'local-task-server.json';
 export interface LocalTaskPayload {
   prompt: string;
   engine?: string;
+  model?: string;
 }
 
 export interface LocalFollowUpPayload {
@@ -85,7 +86,7 @@ function parsePayload(raw: string): LocalTaskPayload {
   if (!parsed || typeof parsed !== 'object') {
     throw new Error('request body must be an object');
   }
-  const obj = parsed as { prompt?: unknown; engine?: unknown };
+  const obj = parsed as { prompt?: unknown; engine?: unknown; model?: unknown };
   if (typeof obj.prompt !== 'string' || obj.prompt.trim().length === 0) {
     throw new Error('prompt must be a non-empty string');
   }
@@ -95,10 +96,15 @@ function parsePayload(raw: string): LocalTaskPayload {
   if (obj.engine != null && (typeof obj.engine !== 'string' || obj.engine.length > 50)) {
     throw new Error('engine must be a string up to 50 characters');
   }
+  if (obj.model != null && (typeof obj.model !== 'string' || obj.model.length > 200)) {
+    throw new Error('model must be a string up to 200 characters');
+  }
   const engine = typeof obj.engine === 'string' ? obj.engine : undefined;
+  const model = typeof obj.model === 'string' ? obj.model.trim() || undefined : undefined;
   return {
     prompt: obj.prompt,
     engine,
+    model,
   };
 }
 

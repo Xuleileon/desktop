@@ -435,6 +435,7 @@ describe('runEngine harness watcher', () => {
   });
 
   test('keeps Pi provider-qualified model ids durable when Pi reports only the model name', async () => {
+    const seenContexts: SpawnContext[] = [];
     const adapter: EngineAdapter = {
       id: 'pi',
       displayName: 'Pi Test',
@@ -442,7 +443,8 @@ describe('runEngine harness watcher', () => {
       async probeInstalled() { return { installed: true }; },
       async probeAuthed() { return { authed: true }; },
       async openLoginInTerminal() { return { opened: false }; },
-      buildSpawnArgs() {
+      buildSpawnArgs(ctx) {
+        seenContexts.push(ctx);
         return ['-e', [
           "console.log(JSON.stringify({ type: 'model' }));",
           "console.log(JSON.stringify({ type: 'done' }));",
@@ -475,9 +477,30 @@ describe('runEngine harness watcher', () => {
       onModelResolved: (info) => resolvedModels.push(info),
     });
 
-    expect(resolvedModels).toEqual([{
+    // A rerun intentionally reuses the Desktop resource id, but it must get a
+    // new provider conversation id so Pi cannot reopen the previous jsonl.
+    await runEngine({
+      engineId: 'pi',
+      model: 'cpa-zeabur-copy/composer-2.5-fast',
+      prompt: 'rerun',
+      sessionId: 'pi-model-session',
+      webContents: createWebContents() as unknown as WebContents,
+      cdpPort: 9222,
+      harnessDir,
+      onEvent: () => undefined,
+    });
+
+    expect(resolvedModels[0]).toEqual({
       model: 'cpa-zeabur-copy/composer-2.5-fast',
       source: 'config',
-    }]);
+    });
+    expect(seenContexts).toHaveLength(2);
+    expect(seenContexts.map((ctx) => ctx.sessionId)).toEqual([
+      'pi-model-session',
+      'pi-model-session',
+    ]);
+    expect(seenContexts[0].providerSessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(seenContexts[1].providerSessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(seenContexts[1].providerSessionId).not.toBe(seenContexts[0].providerSessionId);
   });
 });

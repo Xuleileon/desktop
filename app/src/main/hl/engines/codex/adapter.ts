@@ -21,7 +21,7 @@ import path from 'node:path';
 import { mainLogger } from '../../../logger';
 import { register } from '../registry';
 import { applyBrowserHarnessEnv } from '../browserHarnessEnv';
-import { buildSkillIndexPrompt, SKILL_DISCOVERY_AND_LIFECYCLE_LINES, htmlBlockGuidanceLines, optionsBlockGuidanceLines, askBlockGuidanceLines } from '../skillIndexPrompt';
+import { buildSkillIndexPrompt, BROWSER_TRANSACTION_SAFETY_LINES, SKILL_DISCOVERY_AND_LIFECYCLE_LINES, htmlBlockGuidanceLines, optionsBlockGuidanceLines, askBlockGuidanceLines } from '../skillIndexPrompt';
 import { resolveThemeMode } from '../../../themeMode';
 import { enrichedEnv } from '../pathEnrich';
 import { runCliCapture } from '../cliSpawn';
@@ -111,9 +111,10 @@ const codexAdapter: EngineAdapter = {
   wrapPrompt(ctx: SpawnContext): string {
     const lines: string[] = [
       'You are driving a specific Chromium browser view on this machine.',
-      `Your target is CDP target_id=${ctx.targetId} on port ${ctx.cdpPort} (env BU_TARGET_ID / BU_CDP_PORT).`,
+      `Your browser Space starts at CDP target_id=${ctx.targetId} on port ${ctx.cdpPort} (env BU_TARGET_ID / BU_CDP_PORT). Pages opened by this Space are available through listPageTargets() and session.use(targetId); other conversations remain hidden.`,
       'Read `./AGENTS.md` for how to drive the browser with Browser Harness JS.',
       ...SKILL_DISCOVERY_AND_LIFECYCLE_LINES,
+      ...BROWSER_TRANSACTION_SAFETY_LINES,
       ...htmlBlockGuidanceLines(resolveThemeMode()),
       ...optionsBlockGuidanceLines(),
       ...askBlockGuidanceLines(),

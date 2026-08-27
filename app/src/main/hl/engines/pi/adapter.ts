@@ -1,7 +1,7 @@
 import { mainLogger } from '../../../logger';
 import { register } from '../registry';
 import { applyBrowserHarnessEnv } from '../browserHarnessEnv';
-import { buildSkillIndexPrompt, SKILL_DISCOVERY_AND_LIFECYCLE_LINES, htmlBlockGuidanceLines, optionsBlockGuidanceLines, askBlockGuidanceLines } from '../skillIndexPrompt';
+import { buildSkillIndexPrompt, BROWSER_TRANSACTION_SAFETY_LINES, SKILL_DISCOVERY_AND_LIFECYCLE_LINES, htmlBlockGuidanceLines, optionsBlockGuidanceLines, askBlockGuidanceLines } from '../skillIndexPrompt';
 import { resolveThemeMode } from '../../../themeMode';
 import { enrichedEnv } from '../pathEnrich';
 import { runCliCapture } from '../cliSpawn';
@@ -72,9 +72,10 @@ const piAdapter: EngineAdapter = {
   wrapPrompt(ctx: SpawnContext): string {
     const lines = [
       'You are driving a specific Chromium browser view on this machine.',
-      `Your target is CDP target_id=${ctx.targetId} on port ${ctx.cdpPort} (env BU_TARGET_ID / BU_CDP_PORT).`,
+      `Your browser Space starts at CDP target_id=${ctx.targetId} on port ${ctx.cdpPort} (env BU_TARGET_ID / BU_CDP_PORT). Pages opened by this Space are available through listPageTargets() and session.use(targetId); other conversations remain hidden.`,
       'Read `./AGENTS.md` for how to drive the browser with Browser Harness JS.',
       ...SKILL_DISCOVERY_AND_LIFECYCLE_LINES,
+      ...BROWSER_TRANSACTION_SAFETY_LINES,
       ...htmlBlockGuidanceLines(resolveThemeMode()),
       ...optionsBlockGuidanceLines(),
       ...askBlockGuidanceLines(),
@@ -102,7 +103,10 @@ const piAdapter: EngineAdapter = {
   buildSpawnArgs(ctx: SpawnContext): string[] {
     const args = ['--print', '--mode', 'json', '--approve'];
     if (ctx.resumeSessionId) args.push('--session', ctx.resumeSessionId);
-    else args.push('--session-id', ctx.sessionId);
+    else {
+      if (!ctx.providerSessionId) throw new Error('Pi fresh run requires a provider session id');
+      args.push('--session-id', ctx.providerSessionId);
+    }
     if (ctx.model) args.push('--model', ctx.model);
     return args;
   },

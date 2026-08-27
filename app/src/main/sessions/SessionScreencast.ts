@@ -249,13 +249,18 @@ export class SessionScreencast {
     const preview = this.previews.get(sessionId);
     if (!preview || preview.inFlight || preview.stopped) return;
 
-    if (preview.wc.isDestroyed()) {
-      await this.stop(sessionId);
-      return;
-    }
-
     preview.inFlight = true;
     try {
+      const currentWc = this.pool.getWebContents(sessionId);
+      if (!currentWc || currentWc.isDestroyed()) {
+        await this.stop(sessionId);
+        return;
+      }
+      if (currentWc !== preview.wc && !this.rebindPreviewWebContents(sessionId, preview, currentWc)) {
+        return;
+      }
+
+      const captureWc = preview.wc;
       const params: CaptureScreenshotParams = {
         format: preview.options.format,
         captureBeyondViewport: false,
@@ -270,6 +275,10 @@ export class SessionScreencast {
         CAPTURE_TIMEOUT_MS,
       );
       if (preview.stopped || this.previews.get(sessionId) !== preview) return;
+      // A page can become inactive while captureScreenshot is in flight. Drop
+      // that stale frame rather than flashing the previous tab in the preview;
+      // the next interval will rebind and capture the new active page.
+      if (this.pool.getWebContents(sessionId) !== captureWc) return;
       if (typeof result.data !== 'string' || result.data.length === 0) return;
 
       preview.framesSent += 1;
@@ -301,6 +310,39 @@ export class SessionScreencast {
       preview.inFlight = false;
       if (preview.stopped) this.cleanupPreview(sessionId, preview);
     }
+  }
+
+  private rebindPreviewWebContents(sessionId: string, preview: ActivePreview, nextWc: WebContents): boolean {
+    const nextDbg = nextWc.debugger;
+    let nextAttachedByUs = false;
+    try {
+      if (!nextDbg.isAttached()) {
+        nextDbg.attach(CDP_PROTOCOL_VERSION);
+        nextAttachedByUs = true;
+      }
+    } catch (err) {
+      mainLogger.warn('SessionScreencast.rebind.attachFailed', {
+        sessionId,
+        error: (err as Error).message,
+      });
+      return false;
+    }
+
+    const previousWc = preview.wc;
+    const previousDbg = preview.dbg;
+    const previousAttachedByUs = preview.attachedByUs;
+    preview.wc = nextWc;
+    preview.dbg = nextDbg;
+    preview.attachedByUs = nextAttachedByUs;
+
+    this.detachDebuggerIfOwned(previousWc, previousDbg, previousAttachedByUs);
+    mainLogger.info('SessionScreencast.rebind', {
+      sessionId,
+      previousWcId: previousWc.id,
+      wcId: nextWc.id,
+      attachedByUs: nextAttachedByUs,
+    });
+    return true;
   }
 
   private cleanupPreview(sessionId: string, preview: ActivePreview): void {
@@ -374,9 +416,13 @@ export class SessionScreencast {
   }
 
   private detachIfOwned(preview: ActivePreview): void {
-    if (!preview.attachedByUs || preview.wc.isDestroyed() || !preview.dbg.isAttached()) return;
+    this.detachDebuggerIfOwned(preview.wc, preview.dbg, preview.attachedByUs);
+  }
+
+  private detachDebuggerIfOwned(wc: WebContents, dbg: Debugger, attachedByUs: boolean): void {
+    if (!attachedByUs || wc.isDestroyed()) return;
     try {
-      preview.dbg.detach();
+      if (dbg.isAttached()) dbg.detach();
     } catch (err) {
       mainLogger.debug('SessionScreencast.detach.error', { error: (err as Error).message });
     }

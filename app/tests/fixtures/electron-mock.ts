@@ -253,6 +253,14 @@ function createMockWebContents() {
   const id = webContentsIdCounter++;
   let userAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) BrowserUse/0.0.30 Chrome/146.0.0.0 Electron/41.0.0 Safari/537.36';
   let zoomFactor = 1;
+  let currentUrl = 'about:blank';
+  let currentTitle = 'New Tab';
+  let destroyed = false;
+  let loading = false;
+  let audible = false;
+  let beforeUnloadBlocked = false;
+  let frameRate = 60;
+  let debuggerAttached = false;
   const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
   const on = (event: string, handler: (...args: unknown[]) => void): void => {
     const set = listeners.get(event) ?? new Set<(...args: unknown[]) => void>();
@@ -274,15 +282,21 @@ function createMockWebContents() {
     for (const handler of handlers) handler(...args);
     return handlers.length > 0;
   };
-  let windowOpenHandler: ((details: { url: string }) => { action: 'allow' | 'deny' }) | null = null;
+  type WindowOpenResult = {
+    action: 'allow' | 'deny';
+    createWindow?: (options: Record<string, unknown>) => ReturnType<typeof createMockWebContents>;
+  };
+  let windowOpenHandler: ((details: { url: string }) => WindowOpenResult) | null = null;
   return {
     id,
-    getURL: (): string => 'about:blank',
-    getTitle: (): string => 'New Tab',
+    getURL: (): string => currentUrl,
+    getTitle: (): string => currentTitle,
     getOSProcessId: (): number => 10000 + id,
-    isDestroyed: (): boolean => false,
-    isCurrentlyAudible: (): boolean => false,
-    setFrameRate: (_fps: number): void => undefined,
+    isDestroyed: (): boolean => destroyed,
+    isLoading: (): boolean => loading,
+    isCurrentlyAudible: (): boolean => audible,
+    setFrameRate: (fps: number): void => { frameRate = fps; },
+    getFrameRate: (): number => frameRate,
     setBackgroundThrottling: (_throttle: boolean): void => undefined,
     enableDeviceEmulation: (_params: unknown): void => undefined,
     disableDeviceEmulation: (): void => undefined,
@@ -291,22 +305,53 @@ function createMockWebContents() {
     getUserAgent: (): string => userAgent,
     setUserAgent: (nextUserAgent: string): void => { userAgent = nextUserAgent; },
     executeJavaScript: (_code: string, _userGesture?: boolean): Promise<unknown> => Promise.resolve(undefined),
-    loadURL: (_url: string): Promise<void> => Promise.resolve(),
-    close: (): void => undefined,
+    loadURL: async (nextUrl: string): Promise<void> => {
+      if (destroyed) throw new Error('webContents is destroyed');
+      loading = true;
+      emit('did-start-loading');
+      emit('did-start-navigation', {}, nextUrl, false, true, 0, 0);
+      currentUrl = nextUrl;
+      emit('did-navigate', {}, nextUrl);
+      loading = false;
+      emit('did-stop-loading');
+      emit('did-finish-load');
+    },
+    close: (options?: { waitForBeforeUnload?: boolean }): void => {
+      if (destroyed) return;
+      if (options?.waitForBeforeUnload && beforeUnloadBlocked) {
+        emit('will-prevent-unload', { preventDefault: (): void => undefined });
+        return;
+      }
+      destroyed = true;
+      emit('destroyed');
+    },
+    destroy: (): void => {
+      if (destroyed) return;
+      destroyed = true;
+      emit('destroyed');
+    },
+    focus: (): void => { emit('focus'); },
+    setMockTitle: (title: string): void => {
+      currentTitle = title;
+      emit('page-title-updated', {}, title, true);
+    },
+    setMockUrl: (url: string): void => { currentUrl = url; },
+    setMockAudible: (value: boolean): void => { audible = value; },
+    setMockBeforeUnloadBlocked: (value: boolean): void => { beforeUnloadBlocked = value; },
     on,
     off,
     once,
     emit,
-    setWindowOpenHandler: (handler: (details: { url: string }) => { action: 'allow' | 'deny' }): void => {
+    setWindowOpenHandler: (handler: (details: { url: string }) => WindowOpenResult): void => {
       windowOpenHandler = handler;
     },
-    invokeWindowOpenHandler: (url: string): { action: 'allow' | 'deny' } | null => windowOpenHandler?.({ url }) ?? null,
+    invokeWindowOpenHandler: (url: string): WindowOpenResult | null => windowOpenHandler?.({ url }) ?? null,
     debugger: {
-      attach: (): void => undefined,
+      attach: (): void => { debuggerAttached = true; },
       sendCommand: (): Promise<unknown> => Promise.resolve({}),
-      detach: (): void => undefined,
+      detach: (): void => { debuggerAttached = false; },
       on: (): void => undefined,
-      isAttached: (): boolean => false,
+      isAttached: (): boolean => debuggerAttached,
     },
   };
 }

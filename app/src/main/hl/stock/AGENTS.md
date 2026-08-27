@@ -1,6 +1,6 @@
 # Browser Harness JS
 
-You are driving one specific Chromium browser view on the user's machine.
+You are driving one conversation-scoped Chromium browser Space on the user's machine.
 Use `browser-harness-js` for browser actions. It runs JavaScript snippets
 against a persistent CDP session and exposes Chrome DevTools Protocol domains
 directly as `session.Page`, `session.DOM`, `session.Runtime`, `session.Input`,
@@ -10,16 +10,17 @@ Do not use old `helpers.js` convenience APIs for browser control. `helpers.js`
 is only a small compatibility bridge that points at the vendored
 `browser-harness-js` CLI.
 
-## Your Target
+## Your Space
 
-Two environment variables identify the assigned browser view:
+Two environment variables identify the Space's root browser view:
 
 - `BU_TARGET_ID` - the CDP target id of the view you must drive.
 - `BU_CDP_PORT` - the local CDP HTTP port.
 
-Use only this assigned target. Do not create unrelated browser targets, switch
-to other user tabs, or navigate internal Chrome pages unless the user explicitly
-asks for app/browser diagnostics.
+Use the root target and pages opened from it. `listPageTargets()` shows only
+pages owned by this Space; use `session.use(targetId)` to work across them.
+Targets from other conversations remain inaccessible. Do not navigate internal
+Chrome pages unless the user explicitly asks for app/browser diagnostics.
 
 ## First Call
 
@@ -86,8 +87,8 @@ The `browser-harness-js` REPL preloads:
 - `session` - persistent CDP `Session`.
 - `connectToAssignedTarget()` - Browser Use Desktop helper for `BU_TARGET_ID`
   and `BU_CDP_PORT`.
-- `listPageTargets()` - returns only this conversation's assigned page target.
-  Other Browser Use conversations are intentionally hidden.
+- `listPageTargets()` - async; always call `await listPageTargets()`. It returns
+  only pages in this conversation Space. Other conversations are hidden.
 - `detectBrowsers()` and `resolveWsUrl(opts)` - upstream browser discovery.
 - `CDP` - generated namespace/type reference.
 

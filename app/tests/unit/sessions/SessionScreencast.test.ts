@@ -3,13 +3,13 @@ import type { BrowserWindow, WebContents } from 'electron';
 import type { BrowserPool } from '../../../src/main/sessions/BrowserPool';
 import { SessionScreencast } from '../../../src/main/sessions/SessionScreencast';
 
-function mockWebContents(opts: { destroyed?: boolean; delayCapture?: boolean; hangCapture?: boolean; attached?: boolean; attachThrows?: boolean } = {}): WebContents {
+function mockWebContents(opts: { destroyed?: boolean; delayCapture?: boolean; hangCapture?: boolean; attached?: boolean; attachThrows?: boolean; data?: string } = {}): WebContents {
   let attached = opts.attached ?? false;
   const sendCommand = vi.fn(async (method: string) => {
     if (method !== 'Page.captureScreenshot') return {};
     if (opts.hangCapture) return new Promise(() => {});
     if (opts.delayCapture) await new Promise((resolve) => setTimeout(resolve, 10));
-    return { data: 'jpeg-bytes' };
+    return { data: opts.data ?? 'jpeg-bytes' };
   });
 
   return {
@@ -30,11 +30,13 @@ function makeScreencast(wc: WebContents | null): {
   screencast: SessionScreencast;
   sent: ReturnType<typeof vi.fn>;
   pool: BrowserPool;
+  setWebContents: (next: WebContents | null) => void;
   setWindowDestroyed: (destroyed: boolean) => void;
 } {
+  let activeWebContents = wc;
   let windowDestroyed = false;
   const pool = {
-    getWebContents: vi.fn(() => wc),
+    getWebContents: vi.fn(() => activeWebContents),
     parkForPreview: vi.fn(async () => ({ ok: true, parkedByUs: false })),
     releasePreviewParking: vi.fn(),
   } as unknown as BrowserPool;
@@ -48,6 +50,7 @@ function makeScreencast(wc: WebContents | null): {
     screencast,
     sent,
     pool,
+    setWebContents: (next: WebContents | null) => { activeWebContents = next; },
     setWindowDestroyed: (destroyed: boolean) => { windowDestroyed = destroyed; },
   };
 }
@@ -79,6 +82,57 @@ describe('SessionScreencast', () => {
     });
 
     await screencast.stop('s1');
+  });
+
+  it('rebinds capture to the current active WebContents after a page switch', async () => {
+    const first = mockWebContents({ data: 'first-page' });
+    const second = mockWebContents({ data: 'second-page' });
+    const { screencast, sent, setWebContents } = makeScreencast(first);
+
+    await expect(screencast.start('s1', 'preview', { intervalMs: 10 })).resolves.toEqual({ ok: true });
+    await vi.waitFor(() => expect(sent).toHaveBeenCalledWith('session-preview-frame', 's1', 'first-page'));
+
+    setWebContents(second);
+    await vi.waitFor(() => expect(sent).toHaveBeenCalledWith('session-preview-frame', 's1', 'second-page'));
+
+    expect(first.debugger.detach).toHaveBeenCalledTimes(1);
+    expect(second.debugger.attach).toHaveBeenCalledWith('1.3');
+
+    await screencast.stop('s1');
+    expect(second.debugger.detach).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not detach a previous debugger that the preview did not attach', async () => {
+    const first = mockWebContents({ attached: true, data: 'first-page' });
+    const second = mockWebContents({ data: 'second-page' });
+    const { screencast, sent, setWebContents } = makeScreencast(first);
+
+    await expect(screencast.start('s1', 'preview', { intervalMs: 10 })).resolves.toEqual({ ok: true });
+    await vi.waitFor(() => expect(sent).toHaveBeenCalledWith('session-preview-frame', 's1', 'first-page'));
+
+    setWebContents(second);
+    await vi.waitFor(() => expect(sent).toHaveBeenCalledWith('session-preview-frame', 's1', 'second-page'));
+
+    expect(first.debugger.detach).not.toHaveBeenCalled();
+    await screencast.stop('s1');
+  });
+
+  it('keeps the previous binding intact when the new active debugger cannot attach', async () => {
+    const first = mockWebContents({ data: 'first-page' });
+    const second = mockWebContents({ attachThrows: true, data: 'second-page' });
+    const { screencast, sent, setWebContents } = makeScreencast(first);
+
+    await expect(screencast.start('s1', 'preview', { intervalMs: 10 })).resolves.toEqual({ ok: true });
+    await vi.waitFor(() => expect(sent).toHaveBeenCalledWith('session-preview-frame', 's1', 'first-page'));
+
+    setWebContents(second);
+    await vi.waitFor(() => expect(second.debugger.attach).toHaveBeenCalledWith('1.3'));
+
+    expect(first.debugger.detach).not.toHaveBeenCalled();
+    expect(sent).not.toHaveBeenCalledWith('session-preview-frame', 's1', 'second-page');
+
+    await screencast.stop('s1');
+    expect(first.debugger.detach).toHaveBeenCalledTimes(1);
   });
 
   it('keeps duplicate starts on a single stream', async () => {

@@ -1,4 +1,11 @@
-import { WebContentsView, nativeTheme, type BrowserWindow, type WebContents } from 'electron';
+import {
+  WebContentsView,
+  nativeTheme,
+  type BrowserWindow,
+  type BrowserWindowConstructorOptions,
+  type WebContents,
+} from 'electron';
+import { createHash } from 'node:crypto';
 import { browserLogger } from '../logger';
 import { getWindowBackgroundColor } from '../themeMode';
 import type { TabInfo } from './types';
@@ -11,6 +18,9 @@ const THROTTLED_FRAME_RATE = 4;
 const IDLE_FRAME_RATE = 1;
 const ACTIVE_FRAME_RATE = 60;
 const DEFAULT_IDLE_FREEZE_DELAY_MS = 15_000;
+const DEFAULT_MAX_PAGES_PER_SPACE = 8;
+const DEFAULT_COMPLETED_PAGE_CLEANUP_DELAY_MS = 10 * 60_000;
+const DEFAULT_DUPLICATE_WINDOW_OPEN_REUSE_MS = 30_000;
 const CDP_PROTOCOL_VERSION = '1.3';
 const PREVIEW_PARK_VISIBLE_PX = 1;
 // Edge-to-edge fill. View rect = slot rect, no gutters ever. Page sees
@@ -21,6 +31,7 @@ const PREVIEW_PARK_VISIBLE_PX = 1;
 // ambiguity about where Chromium positions the rendered page.
 const EMULATED_VIEWPORT_HEIGHT = 900;
 const SAFE_TOP_LEVEL_PROTOCOLS = new Set(['about:', 'blob:', 'data:', 'file:', 'http:', 'https:']);
+const VOLATILE_WINDOW_OPEN_PARAMS = new Set(['_rdm', '_key']);
 
 export function isSafeTopLevelUrl(rawUrl: string): boolean {
   try {
@@ -33,16 +44,65 @@ export function isSafeTopLevelUrl(rawUrl: string): boolean {
 type RuntimeBrowserIdentity = Pick<BrowserIdentity, 'userAgent'>;
 type ViewBounds = { x: number; y: number; width: number; height: number };
 
-interface PoolEntry {
-  sessionId: string;
+interface ManagedPage {
   view: WebContentsView;
   createdAt: number;
+  lastActivatedAt: number;
+  pinned: boolean;
+  isRoot: boolean;
+  frozen: boolean;
+  autoCloseProtected: boolean;
+  faviconUrl?: string;
+}
+
+function canonicalWindowOpenUrl(rawUrl: string): string | null {
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+
+    for (const key of Array.from(url.searchParams.keys())) {
+      if (VOLATILE_WINDOW_OPEN_PARAMS.has(key.toLowerCase())) url.searchParams.delete(key);
+    }
+
+    const rawHash = url.hash.slice(1);
+    const hashQueryIndex = rawHash.indexOf('?');
+    if (hashQueryIndex >= 0) {
+      const hashPath = rawHash.slice(0, hashQueryIndex);
+      const hashParams = new URLSearchParams(rawHash.slice(hashQueryIndex + 1));
+      for (const key of Array.from(hashParams.keys())) {
+        if (VOLATILE_WINDOW_OPEN_PARAMS.has(key.toLowerCase())) hashParams.delete(key);
+      }
+      const canonicalHashQuery = hashParams.toString();
+      url.hash = canonicalHashQuery ? `${hashPath}?${canonicalHashQuery}` : hashPath;
+    }
+
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+interface PoolEntry {
+  sessionId: string;
+  rootView: WebContentsView;
+  view: WebContentsView;
+  pages: Map<number, ManagedPage>;
+  createdAt: number;
   attached: boolean;
+  attachedWindow: BrowserWindow | null;
   parked: boolean;
   lastVisibleBounds: ViewBounds | null;
   idleFreezeEligible: boolean;
-  frozen: boolean;
   freezeTimer: ReturnType<typeof setTimeout> | null;
+  completedCleanupTimer: ReturnType<typeof setTimeout> | null;
+  pageLimitRun: Promise<void> | null;
+  pageLimitRequested: boolean;
+  recentWindowOpens: Map<string, { page: ManagedPage; openedAt: number }>;
+}
+
+export function browserSpacePartition(sessionId: string): string {
+  const key = createHash('sha256').update(sessionId).digest('hex').slice(0, 24);
+  return `persist:browser-use-space-${key}`;
 }
 
 function readIdleFreezeDelayMs(): number {
@@ -53,6 +113,14 @@ function readIdleFreezeDelayMs(): number {
   return value;
 }
 
+function readCompletedPageCleanupDelayMs(): number {
+  const raw = process.env.BU_COMPLETED_PAGE_CLEANUP_DELAY_MS;
+  if (raw == null || raw.trim() === '') return DEFAULT_COMPLETED_PAGE_CLEANUP_DELAY_MS;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return DEFAULT_COMPLETED_PAGE_CLEANUP_DELAY_MS;
+  return value;
+}
+
 export class BrowserPool {
   private entries: Map<string, PoolEntry> = new Map();
   private maxConcurrent: number;
@@ -60,13 +128,36 @@ export class BrowserPool {
   private onGone?: (sessionId: string) => void;
   private onCreate?: (sessionId: string) => void;
   private onNavigate?: (sessionId: string, url: string) => void;
+  private onTabsChanged?: (sessionId: string, tabs: TabInfo[]) => void;
   private onInterruptShortcut?: (sessionId: string) => boolean | void;
   private idleFreezeDelayMs: number;
+  private maxPagesPerSpace: number;
+  private completedPageCleanupDelayMs: number;
+  private duplicateWindowOpenReuseMs: number;
 
-  constructor(maxConcurrent = DEFAULT_MAX_CONCURRENT, opts: { idleFreezeDelayMs?: number } = {}) {
+  constructor(
+    maxConcurrent = DEFAULT_MAX_CONCURRENT,
+    opts: {
+      idleFreezeDelayMs?: number;
+      maxPagesPerSpace?: number;
+      completedPageCleanupDelayMs?: number;
+      duplicateWindowOpenReuseMs?: number;
+    } = {},
+  ) {
     this.maxConcurrent = maxConcurrent;
     this.idleFreezeDelayMs = opts.idleFreezeDelayMs ?? readIdleFreezeDelayMs();
-    browserLogger.info('BrowserPool.init', { maxConcurrent });
+    this.maxPagesPerSpace = Math.max(2, Math.floor(opts.maxPagesPerSpace ?? DEFAULT_MAX_PAGES_PER_SPACE));
+    this.completedPageCleanupDelayMs = opts.completedPageCleanupDelayMs ?? readCompletedPageCleanupDelayMs();
+    this.duplicateWindowOpenReuseMs = Math.max(
+      0,
+      Math.floor(opts.duplicateWindowOpenReuseMs ?? DEFAULT_DUPLICATE_WINDOW_OPEN_REUSE_MS),
+    );
+    browserLogger.info('BrowserPool.init', {
+      maxConcurrent,
+      maxPagesPerSpace: this.maxPagesPerSpace,
+      completedPageCleanupDelayMs: this.completedPageCleanupDelayMs,
+      duplicateWindowOpenReuseMs: this.duplicateWindowOpenReuseMs,
+    });
 
     // Repaint every pooled view (attached AND detached) when the theme
     // flips. themeMode.applyBackgroundToAllWindows only walks attached
@@ -76,7 +167,9 @@ export class BrowserPool {
     nativeTheme.on('updated', () => {
       const color = getWindowBackgroundColor();
       for (const entry of this.entries.values()) {
-        try { entry.view.setBackgroundColor(color); } catch { /* view destroyed */ }
+        for (const page of entry.pages.values()) {
+          try { page.view.setBackgroundColor(color); } catch { /* view destroyed */ }
+        }
       }
     });
   }
@@ -103,6 +196,13 @@ export class BrowserPool {
     this.onNavigate = listener;
   }
 
+  /** Notify the shell whenever a Space page is created, activated, renamed,
+   *  navigated, pinned, or closed. The renderer treats this as the source of
+   *  truth for its horizontal page strip. */
+  setOnTabsChanged(listener: (sessionId: string, tabs: TabInfo[]) => void): void {
+    this.onTabsChanged = listener;
+  }
+
   /** Register a listener for Ctrl+C inside an attached browser view. Returning
    *  true means the keypress was handled and should not continue into the page. */
   setOnInterruptShortcut(listener: (sessionId: string) => boolean | void): void {
@@ -119,6 +219,67 @@ export class BrowserPool {
     try { this.onNavigate?.(sessionId, url); } catch (err) {
       browserLogger.warn('BrowserPool.notifyNavigate.listenerError', { sessionId, error: (err as Error).message });
     }
+  }
+
+  private tabSnapshot(entry: PoolEntry): TabInfo[] {
+    return Array.from(entry.pages.values())
+      .filter((page) => !page.view.webContents.isDestroyed())
+      .map((page) => ({
+        targetId: String(page.view.webContents.id),
+        url: page.view.webContents.getURL() || 'about:blank',
+        title: page.view.webContents.getTitle() || 'New Tab',
+        type: 'page' as const,
+        active: page.view === entry.view,
+        pinned: page.pinned,
+        isRoot: page.isRoot,
+        isLoading: page.view.webContents.isLoading(),
+        faviconUrl: page.faviconUrl,
+      }));
+  }
+
+  private notifyTabsChanged(entry: PoolEntry): void {
+    try { this.onTabsChanged?.(entry.sessionId, this.tabSnapshot(entry)); } catch (err) {
+      browserLogger.warn('BrowserPool.notifyTabsChanged.listenerError', {
+        sessionId: entry.sessionId,
+        error: (err as Error).message,
+      });
+    }
+  }
+
+  private activateManagedPage(entry: PoolEntry, nextPage: ManagedPage, reason: string): boolean {
+    const nextView = nextPage.view;
+    if (nextView.webContents.isDestroyed()) return false;
+    nextPage.lastActivatedAt = Date.now();
+    if (entry.view === nextView) {
+      if (nextPage.frozen) void this.setPageLifecycleState(entry, nextPage, 'active', `page-reactivated:${reason}`);
+      this.applyFrameRate(entry);
+      this.notifyTabsChanged(entry);
+      return true;
+    }
+
+    const previousView = entry.view;
+    const stableBounds = entry.lastVisibleBounds ?? previousView.getBounds();
+    entry.view = nextView;
+
+    if (entry.attached && entry.attachedWindow && !entry.attachedWindow.isDestroyed()) {
+      try { entry.attachedWindow.contentView.removeChildView(previousView); } catch { /* already detached */ }
+      nextView.setBounds(stableBounds);
+      this.raiseChildView(entry.attachedWindow, nextView);
+      const fitted = this.fitBoundsToView(stableBounds);
+      try { nextView.webContents.setZoomFactor(fitted.zoom); } catch { /* page may be closing */ }
+      try { nextView.webContents.focus(); } catch { /* page may be closing */ }
+    }
+    this.applyFrameRate(entry);
+    if (nextPage.frozen) void this.setPageLifecycleState(entry, nextPage, 'active', `page-activated:${reason}`);
+    browserLogger.info('BrowserPool.space.pageActivated', {
+      sessionId: entry.sessionId,
+      reason,
+      previousWcId: previousView.webContents.id,
+      wcId: nextView.webContents.id,
+      pageCount: entry.pages.size,
+    });
+    this.notifyTabsChanged(entry);
+    return true;
   }
 
   private notifyInterruptShortcut(sessionId: string): boolean {
@@ -177,6 +338,7 @@ export class BrowserPool {
         nodeIntegration: false,
         sandbox: true,
         backgroundThrottling: true,
+        partition: browserSpacePartition(sessionId),
       },
     });
     // Without this, attach/detach during view swaps briefly paints black
@@ -243,16 +405,31 @@ export class BrowserPool {
     // bounds.width x bounds.height physical pixels — no second knob to
     // disagree, no positioning ambiguity.
 
-    const entry: PoolEntry = {
-      sessionId,
+    const rootPage: ManagedPage = {
       view,
       createdAt: startupStartedAt,
+      lastActivatedAt: startupStartedAt,
+      pinned: false,
+      isRoot: true,
+      frozen: false,
+      autoCloseProtected: false,
+    };
+    const entry: PoolEntry = {
+      sessionId,
+      rootView: view,
+      view,
+      pages: new Map([[view.webContents.id, rootPage]]),
+      createdAt: startupStartedAt,
       attached: false,
+      attachedWindow: null,
       parked: false,
       lastVisibleBounds: null,
       idleFreezeEligible: false,
-      frozen: false,
       freezeTimer: null,
+      completedCleanupTimer: null,
+      pageLimitRun: null,
+      pageLimitRequested: false,
+      recentWindowOpens: new Map(),
     };
 
     this.entries.set(sessionId, entry);
@@ -275,10 +452,194 @@ export class BrowserPool {
       event.preventDefault();
       browserLogger.warn('BrowserPool.navigation.blockedProtocol', { sessionId, url: url.slice(0, 200) });
     });
-    wc.setWindowOpenHandler(({ url }) => {
-      if (isSafeTopLevelUrl(url)) return { action: 'allow' };
-      browserLogger.warn('BrowserPool.windowOpen.blockedProtocol', { sessionId, url: url.slice(0, 200) });
-      return { action: 'deny' };
+    const createManagedWindowOpenHandler = (openerPage: ManagedPage) => ({ url }: { url: string }) => {
+      if (!isSafeTopLevelUrl(url)) {
+        browserLogger.warn('BrowserPool.windowOpen.blockedProtocol', { sessionId, url: url.slice(0, 200) });
+        return { action: 'deny' } as const;
+      }
+
+      const canonicalUrl = canonicalWindowOpenUrl(url);
+      const openerWcId = openerPage.view.webContents.id;
+      const recentKey = canonicalUrl ? `${openerWcId}\n${canonicalUrl}` : null;
+      const now = Date.now();
+      for (const [key, recent] of entry.recentWindowOpens) {
+        const wc = recent.page.view.webContents;
+        if (
+          now - recent.openedAt > this.duplicateWindowOpenReuseMs
+          || wc.isDestroyed()
+          || entry.pages.get(wc.id) !== recent.page
+        ) {
+          entry.recentWindowOpens.delete(key);
+        }
+      }
+      const recent = recentKey && this.duplicateWindowOpenReuseMs > 0
+        ? entry.recentWindowOpens.get(recentKey)
+        : undefined;
+      if (recent) {
+        const reusedWc = recent.page.view.webContents;
+        browserLogger.info('BrowserPool.windowOpen.reusedInSpace', {
+          sessionId,
+          openerWcId,
+          wcId: reusedWc.id,
+          ageMs: now - recent.openedAt,
+          canonicalUrl: canonicalUrl!.slice(0, 200),
+        });
+        setImmediate(() => {
+          if (this.entries.get(sessionId) === entry && !reusedWc.isDestroyed()) {
+            this.activateManagedPage(entry, recent.page, 'duplicate-window-open');
+          }
+        });
+        return { action: 'deny' } as const;
+      }
+
+      if (
+        entry.pages.size >= this.maxPagesPerSpace
+        && !Array.from(entry.pages.values()).some((page) => (
+          !page.isRoot
+          && !page.pinned
+          && !page.autoCloseProtected
+          && page.view !== entry.view
+          && !page.view.webContents.isCurrentlyAudible()
+          && !page.view.webContents.isDestroyed()
+        ))
+      ) {
+        browserLogger.warn('BrowserPool.windowOpen.blockedPageLimit', {
+          sessionId,
+          pageCount: entry.pages.size,
+          maxPagesPerSpace: this.maxPagesPerSpace,
+        });
+        return { action: 'deny' } as const;
+      }
+      browserLogger.info('BrowserPool.windowOpen.managedInSpace', { sessionId, url: url.slice(0, 200) });
+      return {
+        action: 'allow',
+        createWindow: (options: BrowserWindowConstructorOptions) => createManagedPopup(options, url, recentKey),
+      } as const;
+    };
+
+    const createManagedPopup = (
+      options: BrowserWindowConstructorOptions,
+      requestedUrl: string,
+      recentKey: string | null,
+    ): WebContents => {
+      const { session: _ignoredSession, partition: _ignoredPartition, ...popupPreferences } = options.webPreferences ?? {};
+      const popupView = new WebContentsView({
+        webPreferences: {
+          ...popupPreferences,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          backgroundThrottling: true,
+          partition: browserSpacePartition(sessionId),
+        },
+      });
+      popupView.setBackgroundColor(getWindowBackgroundColor());
+      popupView.setBounds(entry.lastVisibleBounds ?? entry.view.getBounds());
+      const popup = popupView.webContents;
+      const popupPage: ManagedPage = {
+        view: popupView,
+        createdAt: Date.now(),
+        lastActivatedAt: Date.now(),
+        pinned: false,
+        isRoot: false,
+        frozen: false,
+        autoCloseProtected: false,
+      };
+      entry.pages.set(popup.id, popupPage);
+      if (recentKey) entry.recentWindowOpens.set(recentKey, { page: popupPage, openedAt: popupPage.createdAt });
+      try { popup.setUserAgent(browserIdentity.userAgent); } catch { /* popup may already be gone */ }
+      popup.setFrameRate(this.frameRateForPage(entry, popupPage));
+      popup.setWindowOpenHandler(createManagedWindowOpenHandler(popupPage));
+      popup.on('will-navigate', (event, url) => {
+        if (isSafeTopLevelUrl(url)) return;
+        event.preventDefault();
+        browserLogger.warn('BrowserPool.navigation.blockedProtocol', { sessionId, url: url.slice(0, 200), wcId: popup.id });
+      });
+      popup.on('before-input-event', (event, input) => {
+        if (input.type === 'keyDown' && input.key.toLowerCase() === 'c' && input.control && !input.meta && !input.alt) {
+          if (this.notifyInterruptShortcut(sessionId)) event.preventDefault();
+        }
+      });
+      popup.on('focus', () => this.activateManagedPage(entry, popupPage, 'focus'));
+      popup.on('did-start-loading', () => this.notifyTabsChanged(entry));
+      popup.on('did-stop-loading', () => this.notifyTabsChanged(entry));
+      popup.on('page-title-updated', () => this.notifyTabsChanged(entry));
+      popup.on('will-prevent-unload', () => {
+        popupPage.autoCloseProtected = true;
+        browserLogger.info('BrowserPool.space.pageProtectedBeforeUnload', {
+          sessionId,
+          wcId: popup.id,
+        });
+        this.notifyTabsChanged(entry);
+      });
+      popup.on('page-favicon-updated', (_event, favicons: string[]) => {
+        popupPage.faviconUrl = favicons.find((favicon) => typeof favicon === 'string' && favicon.length > 0);
+        this.notifyTabsChanged(entry);
+      });
+      popup.on('did-navigate', (_event, url) => {
+        popupPage.autoCloseProtected = false;
+        if (entry.view === popupView) this.notifyNavigate(sessionId, url);
+        this.notifyTabsChanged(entry);
+      });
+      popup.on('did-navigate-in-page', (_event, url, isMainFrame) => {
+        if (isMainFrame && entry.view === popupView) this.notifyNavigate(sessionId, url);
+        if (isMainFrame) this.notifyTabsChanged(entry);
+      });
+      popup.on('destroyed', () => {
+        entry.pages.delete(popup.id);
+        if (this.entries.get(sessionId) !== entry) return;
+        if (entry.view === popupView) {
+          const fallback = Array.from(entry.pages.values())
+            .filter((page) => !page.view.webContents.isDestroyed())
+            .sort((a, b) => Number(b.isRoot) - Number(a.isRoot) || b.lastActivatedAt - a.lastActivatedAt)[0];
+          if (fallback) this.activateManagedPage(entry, fallback, 'active-page-destroyed');
+        }
+        browserLogger.info('BrowserPool.space.pageDestroyed', { sessionId, wcId: popup.id, pageCount: entry.pages.size });
+        this.notifyTabsChanged(entry);
+      });
+      // Electron normally commits the requested URL after createWindow returns.
+      // A detached Space (for example a task submitted before its chat is shown)
+      // can leave that first navigation pending indefinitely, which also makes
+      // Target.attachToTarget hang. Only rescue the genuinely untouched target;
+      // visible/normal popups keep Electron's native navigation path.
+      const initialNavigationTimer = setTimeout(() => {
+        if (this.entries.get(sessionId) !== entry) return;
+        if (popup.isDestroyed() || popup.getURL() || popup.isLoading()) return;
+        void popup.loadURL(requestedUrl).catch((err) => {
+          browserLogger.warn('BrowserPool.space.popupInitialNavigationFailed', {
+            sessionId,
+            wcId: popup.id,
+            url: requestedUrl.slice(0, 200),
+            error: (err as Error).message,
+          });
+        });
+      }, 100);
+      initialNavigationTimer.unref?.();
+      setImmediate(() => {
+        if (this.entries.get(sessionId) === entry) this.activateManagedPage(entry, popupPage, 'window-open');
+      });
+      browserLogger.info('BrowserPool.space.pageCreated', { sessionId, wcId: popup.id, pageCount: entry.pages.size });
+      this.notifyTabsChanged(entry);
+      this.schedulePageLimitEnforcement(entry);
+      return popup;
+    };
+
+    wc.setWindowOpenHandler(createManagedWindowOpenHandler(rootPage));
+    wc.on('focus', () => this.activateManagedPage(entry, rootPage, 'focus'));
+    wc.on('did-start-loading', () => this.notifyTabsChanged(entry));
+    wc.on('did-stop-loading', () => this.notifyTabsChanged(entry));
+    wc.on('page-title-updated', () => this.notifyTabsChanged(entry));
+    wc.on('will-prevent-unload', () => {
+      rootPage.autoCloseProtected = true;
+      browserLogger.info('BrowserPool.space.pageProtectedBeforeUnload', {
+        sessionId,
+        wcId: wc.id,
+      });
+      this.notifyTabsChanged(entry);
+    });
+    wc.on('page-favicon-updated', (_event, favicons: string[]) => {
+      rootPage.faviconUrl = favicons.find((favicon) => typeof favicon === 'string' && favicon.length > 0);
+      this.notifyTabsChanged(entry);
     });
     let navigationSeq = 0;
     let currentNavigation: { id: number; url: string; startedAt: number } | null = null;
@@ -343,10 +704,12 @@ export class BrowserPool {
     });
     wc.on('destroyed', () => {
       browserLogger.info('BrowserPool.wc.destroyed', { sessionId, msSinceCreate: startupMs() });
-      const entry = this.entries.get(sessionId);
-      if (entry) this.clearIdleFreezeTimer(entry);
-      this.entries.delete(sessionId);
-      this.notifyGone(sessionId);
+      const liveEntry = this.entries.get(sessionId);
+      if (!liveEntry) return;
+      // The root target anchors the Space for agent resume and isolation. If
+      // it dies unexpectedly, tear down every child page as one unit instead
+      // of leaving orphaned WebContents running outside session ownership.
+      this.destroy(sessionId, liveEntry.attachedWindow ?? undefined);
     });
     wc.on('render-process-gone', (_event, details) => {
       browserLogger.warn('BrowserPool.wc.renderProcessGone', { sessionId, reason: details.reason, msSinceCreate: startupMs() });
@@ -398,6 +761,7 @@ export class BrowserPool {
     // Top-frame navigation — full page load. Covers agent-driven goto(),
     // user clicks on links, form submits, history back/forward, etc.
     wc.on('did-navigate', (_event, url) => {
+      rootPage.autoCloseProtected = false;
       browserLogger.info('BrowserPool.navigation.didNavigate', {
         sessionId,
         component: 'BrowserPool',
@@ -412,7 +776,8 @@ export class BrowserPool {
         pid: wc.getOSProcessId(),
         wcId: wc.id,
       });
-      this.notifyNavigate(sessionId, url);
+      if (entry.view === view) this.notifyNavigate(sessionId, url);
+      this.notifyTabsChanged(entry);
     });
     wc.on('did-finish-load', () => {
       if (!currentNavigation) return;
@@ -469,7 +834,8 @@ export class BrowserPool {
           pid: wc.getOSProcessId(),
           wcId: wc.id,
         });
-        this.notifyNavigate(sessionId, url);
+        if (entry.view === view) this.notifyNavigate(sessionId, url);
+        this.notifyTabsChanged(entry);
       }
     });
 
@@ -480,6 +846,8 @@ export class BrowserPool {
       pid: view.webContents.getOSProcessId(),
     });
 
+    this.notifyTabsChanged(entry);
+
     return view;
   }
 
@@ -487,6 +855,12 @@ export class BrowserPool {
     const entry = this.entries.get(sessionId);
     if (!entry) return null;
     return entry.view.webContents;
+  }
+
+  getRootWebContents(sessionId: string): WebContents | null {
+    const entry = this.entries.get(sessionId);
+    if (!entry || entry.rootView.webContents.isDestroyed()) return null;
+    return entry.rootView.webContents;
   }
 
   getView(sessionId: string): WebContentsView | null {
@@ -499,6 +873,7 @@ export class BrowserPool {
     if (!entry) return;
     entry.idleFreezeEligible = false;
     this.clearIdleFreezeTimer(entry);
+    this.clearCompletedCleanupTimer(entry);
     this.applyFrameRate(entry);
     await this.setLifecycleState(entry, 'active', 'session-active');
   }
@@ -509,6 +884,7 @@ export class BrowserPool {
     entry.idleFreezeEligible = true;
     this.applyFrameRate(entry);
     this.scheduleIdleFreeze(entry, 'session-idle');
+    this.scheduleCompletedPageCleanup(entry);
   }
 
   private clearIdleFreezeTimer(entry: PoolEntry): void {
@@ -517,19 +893,174 @@ export class BrowserPool {
     entry.freezeTimer = null;
   }
 
+  private clearCompletedCleanupTimer(entry: PoolEntry): void {
+    if (!entry.completedCleanupTimer) return;
+    clearTimeout(entry.completedCleanupTimer);
+    entry.completedCleanupTimer = null;
+  }
+
+  private scheduleCompletedPageCleanup(entry: PoolEntry): void {
+    this.clearCompletedCleanupTimer(entry);
+    entry.completedCleanupTimer = setTimeout(() => {
+      entry.completedCleanupTimer = null;
+      const current = this.entries.get(entry.sessionId);
+      if (current !== entry || !entry.idleFreezeEligible) return;
+      void this.cleanupCompletedPages(entry);
+    }, this.completedPageCleanupDelayMs);
+    entry.completedCleanupTimer.unref?.();
+  }
+
+  private async cleanupCompletedPages(entry: PoolEntry): Promise<void> {
+    const candidates = Array.from(entry.pages.values())
+      .filter((page) => (
+        !page.isRoot
+        && !page.pinned
+        && !page.autoCloseProtected
+        && page.view !== entry.view
+        && !page.view.webContents.isCurrentlyAudible()
+      ))
+      .sort((a, b) => a.lastActivatedAt - b.lastActivatedAt);
+    let closed = 0;
+    for (const page of candidates) {
+      if (await this.requestPageClose(entry, page, 'completed-cleanup')) closed += 1;
+    }
+    browserLogger.info('BrowserPool.space.completedCleanup', {
+      sessionId: entry.sessionId,
+      candidates: candidates.length,
+      closed,
+      remaining: entry.pages.size,
+    });
+  }
+
+  private schedulePageLimitEnforcement(entry: PoolEntry): void {
+    entry.pageLimitRequested = true;
+    if (entry.pageLimitRun) return;
+    entry.pageLimitRun = (async () => {
+      while (entry.pageLimitRequested && this.entries.get(entry.sessionId) === entry) {
+        entry.pageLimitRequested = false;
+        await this.enforcePageLimit(entry);
+      }
+    })().finally(() => {
+      if (this.entries.get(entry.sessionId) === entry) {
+        entry.pageLimitRun = null;
+        if (entry.pageLimitRequested) queueMicrotask(() => this.schedulePageLimitEnforcement(entry));
+      }
+    });
+  }
+
+  private async enforcePageLimit(entry: PoolEntry): Promise<void> {
+    const attempted = new Set<number>();
+    while (entry.pages.size > this.maxPagesPerSpace) {
+      const candidate = Array.from(entry.pages.entries())
+        .filter(([id, page]) => (
+          !attempted.has(id)
+          && !page.isRoot
+          && !page.pinned
+          && !page.autoCloseProtected
+          && page.view !== entry.view
+          && !page.view.webContents.isCurrentlyAudible()
+          && !page.view.webContents.isDestroyed()
+        ))
+        .sort(([, a], [, b]) => a.lastActivatedAt - b.lastActivatedAt)[0];
+      if (!candidate) break;
+      const [id, page] = candidate;
+      attempted.add(id);
+      await this.requestPageClose(entry, page, 'page-limit');
+    }
+    if (entry.pages.size > this.maxPagesPerSpace) {
+      // A newly opened page can become active before an older candidate's
+      // beforeunload veto is known. If every old page is now protected, move
+      // focus back to the root and try to discard only that just-created
+      // overflow page. A veto restores it as active and leaves the Space
+      // temporarily over quota rather than risking unsaved data.
+      const newest = Array.from(entry.pages.values())
+        .filter((page) => !page.isRoot && !page.pinned && !page.autoCloseProtected && !page.view.webContents.isDestroyed())
+        .sort((a, b) => b.createdAt - a.createdAt)[0];
+      const root = Array.from(entry.pages.values()).find((page) => page.isRoot && !page.view.webContents.isDestroyed());
+      if (
+        newest
+        && newest.view === entry.view
+        && root
+        && Date.now() - newest.createdAt < 10_000
+        && !newest.view.webContents.isCurrentlyAudible()
+        && this.activateManagedPage(entry, root, 'page-limit-overflow-fallback')
+      ) {
+        const closed = await this.requestPageClose(entry, newest, 'page-limit-new-overflow');
+        if (!closed && this.entries.get(entry.sessionId) === entry) {
+          this.activateManagedPage(entry, newest, 'page-limit-overflow-veto');
+        }
+      }
+    }
+    if (entry.pages.size > this.maxPagesPerSpace) {
+      browserLogger.warn('BrowserPool.space.pageLimitDeferred', {
+        sessionId: entry.sessionId,
+        pageCount: entry.pages.size,
+        maxPagesPerSpace: this.maxPagesPerSpace,
+        reason: 'all remaining pages are protected, audible, active, or blocked beforeunload',
+      });
+    }
+  }
+
+  private requestPageClose(entry: PoolEntry, page: ManagedPage, reason: string): Promise<boolean> {
+    const wc = page.view.webContents;
+    if (wc.isDestroyed()) return Promise.resolve(true);
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (closed: boolean): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        wc.off('destroyed', onDestroyed);
+        if (!closed) {
+          page.autoCloseProtected = true;
+          browserLogger.info('BrowserPool.space.pageCloseDeferred', {
+            sessionId: entry.sessionId,
+            wcId: wc.id,
+            reason,
+          });
+          this.notifyTabsChanged(entry);
+        }
+        resolve(closed);
+      };
+      const onDestroyed = (): void => finish(true);
+      const timer = setTimeout(() => finish(wc.isDestroyed()), 1_500);
+      timer.unref?.();
+      wc.once('destroyed', onDestroyed);
+      try {
+        wc.close({ waitForBeforeUnload: true });
+      } catch (err) {
+        browserLogger.warn('BrowserPool.space.pageCloseError', {
+          sessionId: entry.sessionId,
+          wcId: wc.id,
+          reason,
+          error: (err as Error).message,
+        });
+        finish(false);
+      }
+    });
+  }
+
   private frameRateFor(entry: PoolEntry): number {
-    if (entry.attached) return ACTIVE_FRAME_RATE;
+    const activePage = entry.pages.get(entry.view.webContents.id);
+    return activePage ? this.frameRateForPage(entry, activePage) : THROTTLED_FRAME_RATE;
+  }
+
+  private frameRateForPage(entry: PoolEntry, page: ManagedPage): number {
+    if (page.view === entry.view && entry.attached && !entry.parked) return ACTIVE_FRAME_RATE;
     return entry.idleFreezeEligible ? IDLE_FRAME_RATE : THROTTLED_FRAME_RATE;
   }
 
   private applyFrameRate(entry: PoolEntry): void {
-    try {
-      entry.view.webContents.setFrameRate(this.frameRateFor(entry));
-    } catch (err) {
-      browserLogger.warn('BrowserPool.frameRate.error', {
-        sessionId: entry.sessionId,
-        error: (err as Error).message,
-      });
+    for (const page of entry.pages.values()) {
+      try {
+        page.view.webContents.setFrameRate(this.frameRateForPage(entry, page));
+      } catch (err) {
+        browserLogger.warn('BrowserPool.frameRate.error', {
+          sessionId: entry.sessionId,
+          wcId: page.view.webContents.id,
+          error: (err as Error).message,
+        });
+      }
     }
   }
 
@@ -543,19 +1074,29 @@ export class BrowserPool {
       if (current !== entry) return;
       void this.freezeIfStillIdle(entry, reason);
     }, this.idleFreezeDelayMs);
+    entry.freezeTimer.unref?.();
   }
 
   private async freezeIfStillIdle(entry: PoolEntry, reason: string): Promise<void> {
-    if (!entry.idleFreezeEligible || entry.attached || entry.frozen) return;
-    const wc = entry.view.webContents;
-    if (wc.isDestroyed()) return;
-    if (wc.isCurrentlyAudible()) {
-      browserLogger.info('BrowserPool.freeze.skippedAudible', { sessionId: entry.sessionId, reason });
-      this.scheduleIdleFreeze(entry, 'audible-retry');
-      return;
+    if (!entry.idleFreezeEligible || entry.attached) return;
+    let audiblePages = 0;
+    for (const page of entry.pages.values()) {
+      const wc = page.view.webContents;
+      if (wc.isDestroyed() || page.frozen) continue;
+      if (wc.isCurrentlyAudible()) {
+        audiblePages += 1;
+        continue;
+      }
+      await this.setPageLifecycleState(entry, page, 'frozen', reason);
     }
-
-    await this.setLifecycleState(entry, 'frozen', reason);
+    if (audiblePages > 0) {
+      browserLogger.info('BrowserPool.freeze.skippedAudible', {
+        sessionId: entry.sessionId,
+        reason,
+        audiblePages,
+      });
+      this.scheduleIdleFreeze(entry, 'audible-retry');
+    }
   }
 
   private async wakeForVisibility(entry: PoolEntry, reason: string): Promise<void> {
@@ -564,25 +1105,38 @@ export class BrowserPool {
   }
 
   private async setLifecycleState(entry: PoolEntry, state: 'active' | 'frozen', reason: string): Promise<void> {
-    const wc = entry.view.webContents;
+    for (const page of entry.pages.values()) {
+      await this.setPageLifecycleState(entry, page, state, reason);
+    }
+  }
+
+  private async setPageLifecycleState(
+    entry: PoolEntry,
+    page: ManagedPage,
+    state: 'active' | 'frozen',
+    reason: string,
+  ): Promise<void> {
+    const wc = page.view.webContents;
     if (wc.isDestroyed()) return;
-    if (state === 'active' && !entry.frozen) return;
-    if (state === 'frozen' && entry.frozen) return;
+    if (state === 'active' && !page.frozen) return;
+    if (state === 'frozen' && page.frozen) return;
 
     const dbg = wc.debugger;
     const wasAttached = dbg.isAttached();
     try {
       if (!wasAttached) dbg.attach(CDP_PROTOCOL_VERSION);
       await dbg.sendCommand('Page.setWebLifecycleState', { state });
-      entry.frozen = state === 'frozen';
+      page.frozen = state === 'frozen';
       browserLogger.info('BrowserPool.lifecycleState', {
         sessionId: entry.sessionId,
+        wcId: wc.id,
         state,
         reason,
       });
     } catch (err) {
       browserLogger.debug('BrowserPool.lifecycleState.error', {
         sessionId: entry.sessionId,
+        wcId: wc.id,
         state,
         reason,
         error: (err as Error).message,
@@ -632,6 +1186,7 @@ export class BrowserPool {
       if (entry.sessionId === sessionId || !entry.attached || entry.parked) continue;
       try { window.contentView.removeChildView(entry.view); } catch { /* already removed */ }
       entry.attached = false;
+      entry.attachedWindow = null;
       this.applyFrameRate(entry);
       this.scheduleIdleFreeze(entry, 'replaced-by-visible-session');
       browserLogger.info('BrowserPool.detachVisibleSibling', {
@@ -712,6 +1267,7 @@ export class BrowserPool {
       entry.view.setBounds({ x: fitted.x, y: fitted.y, width: fitted.width, height: fitted.height });
       try { entry.view.webContents.setZoomFactor(fitted.zoom); } catch { /* ignore */ }
       entry.parked = false;
+      entry.attachedWindow = window;
       this.rememberVisibleBounds(entry, { x: fitted.x, y: fitted.y, width: fitted.width, height: fitted.height });
       void this.wakeForVisibility(entry, 'attach');
       this.applyFrameRate(entry);
@@ -721,6 +1277,7 @@ export class BrowserPool {
     entry.view.setBounds({ x: fitted.x, y: fitted.y, width: fitted.width, height: fitted.height });
     this.raiseChildView(window, entry.view);
     entry.attached = true;
+    entry.attachedWindow = window;
     entry.parked = false;
     this.rememberVisibleBounds(entry, { x: fitted.x, y: fitted.y, width: fitted.width, height: fitted.height });
     void this.wakeForVisibility(entry, 'attach');
@@ -760,6 +1317,7 @@ export class BrowserPool {
 
     window.contentView.removeChildView(entry.view);
     entry.attached = false;
+    entry.attachedWindow = null;
     entry.parked = false;
 
     this.applyFrameRate(entry);
@@ -795,14 +1353,7 @@ export class BrowserPool {
         entry.view.setBounds(this.getPreviewParkBounds(window, width, height));
         entry.parked = true;
         parked += 1;
-        try {
-          entry.view.webContents.setFrameRate(entry.idleFreezeEligible ? IDLE_FRAME_RATE : THROTTLED_FRAME_RATE);
-        } catch (err) {
-          browserLogger.warn('BrowserPool.temporarilyDetachAll.frameRate.error', {
-            sessionId: entry.sessionId,
-            error: (err as Error).message,
-          });
-        }
+        this.applyFrameRate(entry);
       }
     }
     browserLogger.info('BrowserPool.temporarilyDetachAll', { parked });
@@ -828,17 +1379,11 @@ export class BrowserPool {
     const height = Math.max(1, stableBounds.height || DEFAULT_BROWSER_HEIGHT);
     entry.view.setBounds(this.getPreviewParkBounds(window, width, height));
     entry.attached = true;
+    entry.attachedWindow = window;
     entry.parked = true;
     this.clearIdleFreezeTimer(entry);
     await this.wakeForVisibility(entry, 'preview');
-    try {
-      entry.view.webContents.setFrameRate(entry.idleFreezeEligible ? IDLE_FRAME_RATE : THROTTLED_FRAME_RATE);
-    } catch (err) {
-      browserLogger.warn('BrowserPool.parkForPreview.frameRate.error', {
-        sessionId,
-        error: (err as Error).message,
-      });
-    }
+    this.applyFrameRate(entry);
     browserLogger.info('BrowserPool.parkForPreview', { sessionId, parkedByUs, width, height, bounds: entry.view.getBounds() });
     return { ok: true, parkedByUs };
   }
@@ -858,6 +1403,7 @@ export class BrowserPool {
       }
     }
     entry.attached = false;
+    entry.attachedWindow = null;
     entry.parked = false;
     this.applyFrameRate(entry);
     this.scheduleIdleFreeze(entry, 'preview-stopped');
@@ -872,6 +1418,7 @@ export class BrowserPool {
     let reattached = 0;
     for (const entry of this.entries.values()) {
       if (entry.attached) {
+        entry.attachedWindow = window;
         this.ensureChildView(window, entry.view);
         if (entry.parked && entry.lastVisibleBounds) {
           entry.view.setBounds(entry.lastVisibleBounds);
@@ -886,20 +1433,10 @@ export class BrowserPool {
   }
 
   async getTabs(sessionId: string): Promise<TabInfo[]> {
-    const wc = this.getWebContents(sessionId);
-    if (!wc) return [];
-
     try {
-      const url = wc.getURL();
-      const title = wc.getTitle();
-
-      return [{
-        targetId: String(wc.id),
-        url: url || 'about:blank',
-        title: title || 'New Tab',
-        type: 'page',
-        active: true,
-      }];
+      const entry = this.entries.get(sessionId);
+      if (!entry) return [];
+      return this.tabSnapshot(entry);
     } catch (err) {
       browserLogger.warn('BrowserPool.getTabs.error', {
         sessionId,
@@ -907,6 +1444,57 @@ export class BrowserPool {
       });
       return [];
     }
+  }
+
+  activatePage(sessionId: string, targetId: string): { activated: boolean; reason?: string } {
+    const entry = this.entries.get(sessionId);
+    if (!entry) return { activated: false, reason: 'session_not_found' };
+    const wcId = Number(targetId);
+    if (!Number.isSafeInteger(wcId)) return { activated: false, reason: 'invalid_target' };
+    const page = entry.pages.get(wcId);
+    if (!page || page.view.webContents.isDestroyed()) return { activated: false, reason: 'page_not_found' };
+    return this.activateManagedPage(entry, page, 'user-tab-strip')
+      ? { activated: true }
+      : { activated: false, reason: 'page_destroyed' };
+  }
+
+  setPagePinned(sessionId: string, targetId: string, pinned: boolean): { pinned: boolean; reason?: string } {
+    const entry = this.entries.get(sessionId);
+    if (!entry) return { pinned: false, reason: 'session_not_found' };
+    const wcId = Number(targetId);
+    if (!Number.isSafeInteger(wcId)) return { pinned: false, reason: 'invalid_target' };
+    const page = entry.pages.get(wcId);
+    if (!page || page.view.webContents.isDestroyed()) return { pinned: false, reason: 'page_not_found' };
+    if (page.isRoot) return { pinned: false, reason: 'root_always_protected' };
+    page.pinned = pinned;
+    browserLogger.info('BrowserPool.space.pagePinned', { sessionId, wcId, pinned });
+    this.notifyTabsChanged(entry);
+    return { pinned };
+  }
+
+  async closePage(sessionId: string, targetId: string): Promise<{ closed: boolean; reason?: string }> {
+    const entry = this.entries.get(sessionId);
+    if (!entry) return { closed: false, reason: 'session_not_found' };
+    const wcId = Number(targetId);
+    if (!Number.isSafeInteger(wcId)) return { closed: false, reason: 'invalid_target' };
+    const page = entry.pages.get(wcId);
+    if (!page || page.view.webContents.isDestroyed()) return { closed: false, reason: 'page_not_found' };
+    if (page.isRoot) return { closed: false, reason: 'root_protected' };
+
+    if (page.view === entry.view) {
+      const fallback = Array.from(entry.pages.values())
+        .filter((candidate) => candidate !== page && !candidate.view.webContents.isDestroyed())
+        .sort((a, b) => Number(b.isRoot) - Number(a.isRoot) || b.lastActivatedAt - a.lastActivatedAt)[0];
+      if (!fallback || !this.activateManagedPage(entry, fallback, 'active-page-close')) {
+        return { closed: false, reason: 'no_fallback' };
+      }
+    }
+
+    const closed = await this.requestPageClose(entry, page, 'user-tab-strip');
+    if (!closed && this.entries.get(sessionId) === entry) {
+      this.activateManagedPage(entry, page, 'user-close-beforeunload-veto');
+    }
+    return closed ? { closed: true } : { closed: false, reason: 'beforeunload_blocked' };
   }
 
   destroy(sessionId: string, window?: BrowserWindow): void {
@@ -929,12 +1517,14 @@ export class BrowserPool {
 
     const lifetimeMs = Date.now() - entry.createdAt;
     this.clearIdleFreezeTimer(entry);
+    this.clearCompletedCleanupTimer(entry);
 
     // Delete from map first so the wc.on('destroyed') listener's notifyGone
     // is a clean no-op (it still fires, but the entry is already gone).
     this.entries.delete(sessionId);
 
     const wc = entry.view.webContents;
+    const pages = Array.from(entry.pages.values());
     let closed = false;
     try {
       if (!wc.isDestroyed()) {
@@ -953,15 +1543,19 @@ export class BrowserPool {
     // next tick if it's still alive — this fires the `destroyed` listener,
     // which also calls notifyGone (idempotent on the renderer).
     setImmediate(() => {
-      try {
-        if (!wc.isDestroyed()) {
-          (wc as unknown as { destroy?: () => void }).destroy?.();
+      for (const page of pages) {
+        const pageWc = page.view.webContents;
+        try {
+          if (!pageWc.isDestroyed()) {
+            (pageWc as unknown as { destroy?: () => void }).destroy?.();
+          }
+        } catch (err) {
+          browserLogger.warn('BrowserPool.destroy.forceError', {
+            sessionId,
+            wcId: pageWc.id,
+            error: (err as Error).message,
+          });
         }
-      } catch (err) {
-        browserLogger.warn('BrowserPool.destroy.forceError', {
-          sessionId,
-          error: (err as Error).message,
-        });
       }
     });
 

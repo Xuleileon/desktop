@@ -199,6 +199,10 @@ export const TabInfoSchema = z.object({
   title: z.string(),
   type: z.enum(['page', 'iframe', 'other']),
   active: z.boolean(),
+  pinned: z.boolean(),
+  isRoot: z.boolean(),
+  isLoading: z.boolean(),
+  faviconUrl: z.string().optional(),
 });
 
 export type TabInfo = z.infer<typeof TabInfoSchema>;

@@ -218,6 +218,9 @@ describe('TabInfoSchema', () => {
       title: 'Example',
       type: 'page',
       active: true,
+      pinned: false,
+      isRoot: true,
+      isLoading: false,
     });
     expect(tab.url).toBe('https://example.com');
   });
@@ -229,6 +232,9 @@ describe('TabInfoSchema', () => {
       title: '',
       type: 'worker',
       active: false,
+      pinned: false,
+      isRoot: false,
+      isLoading: false,
     })).toThrow();
   });
 });
@@ -300,7 +306,14 @@ describe('validation helpers', () => {
 
   it('validateTabs passes for valid tab array', () => {
     const result = validateTabs([{
-      targetId: '1', url: 'https://x.com', title: 'X', type: 'page', active: true,
+      targetId: '1',
+      url: 'https://x.com',
+      title: 'X',
+      type: 'page',
+      active: true,
+      pinned: false,
+      isRoot: true,
+      isLoading: false,
     }]);
     expect(result.length).toBe(1);
   });

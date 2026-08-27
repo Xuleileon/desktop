@@ -93,7 +93,10 @@ interface ElectronSessionAPI {
   viewIsAttached: (id: string) => Promise<boolean>;
   viewsSetVisible: (visible: boolean) => Promise<void>;
   viewsDetachAll: () => Promise<void>;
-  getTabs: (id: string) => Promise<unknown[]>;
+  getTabs: (id: string) => Promise<import('../shared/session-schemas').TabInfo[]>;
+  activatePage: (id: string, targetId: string) => Promise<{ activated: boolean; reason?: string }>;
+  closePage: (id: string, targetId: string) => Promise<{ closed: boolean; reason?: string }>;
+  setPagePinned: (id: string, targetId: string, pinned: boolean) => Promise<{ pinned: boolean; reason?: string }>;
   poolStats: () => Promise<unknown>;
   memory: () => Promise<{
     totalMb: number;
@@ -184,6 +187,7 @@ interface ElectronOnAPI {
   sessionDeleted: (cb: (id: string) => void) => () => void;
   sessionBrowserGone: (cb: (id: string) => void) => () => void;
   sessionBrowserAttached: (cb: (id: string) => void) => () => void;
+  sessionTabsChanged: (cb: (id: string, tabs: import('../shared/session-schemas').TabInfo[]) => void) => () => void;
   sessionOutput: (cb: (id: string, event: import('./hub/types').HlEvent) => void) => () => void;
   sessionOutputTerm: (cb: (id: string, bytes: string) => void) => () => void;
   sessionPreviewFrame: (cb: (id: string, dataB64: string) => void) => () => void;
@@ -228,15 +232,6 @@ interface ElectronLogsAPI {
     anchor?: { x: number; y: number; width: number; height: number },
   ) => Promise<void>;
   updateAnchor: (anchor: { x: number; y: number; width: number; height: number }) => void;
-}
-
-interface ElectronTakeoverAPI {
-  show: (
-    sessionId: string,
-    bounds: { x: number; y: number; width: number; height: number },
-    mode?: 'idle' | 'active',
-  ) => Promise<void>;
-  hide: (sessionId: string) => Promise<void>;
 }
 
 interface ElectronPopupAPI {
@@ -378,7 +373,6 @@ interface ElectronAPI {
   pill: ElectronPillAPI;
   logs?: ElectronLogsAPI;
   popup?: ElectronPopupAPI;
-  takeover?: ElectronTakeoverAPI;
   sessions: ElectronSessionAPI;
   channels: ElectronChannelsAPI;
   chromeImport?: ElectronChromeImportAPI;

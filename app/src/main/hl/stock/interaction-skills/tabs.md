@@ -1,8 +1,9 @@
 # Tabs
 
-> Browser Use Desktop isolation: a conversation owns one page target. Targets
-> belonging to other conversations are hidden, and `session.use()` rejects
-> them. Prefer same-page navigation instead of switching Browser Use targets.
+> Browser Use Desktop isolation: a conversation owns one browser Space. A
+> Space may contain multiple page targets opened by that Space, while targets
+> belonging to other conversations stay hidden and `session.use()` rejects
+> them.
 
 Use **CDP for control** (attach, activate known targets, inspect). Use **UI automation for visible order**.
 
@@ -10,10 +11,12 @@ Use **CDP for control** (attach, activate known targets, inspect). Use **UI auto
 
 ```js
 // List page targets (filtered; chrome:// / devtools:// dropped)
+// This helper is async. Never omit `await`.
 const tabs = await listPageTargets()
 
-// Create a new tab and route subsequent calls to it
-const { targetId } = await session.Target.createTarget({ url: 'https://example.com' })
+// Create a managed page from the current page, then discover its target
+await page.evaluate(() => window.open('https://example.com', '_blank'))
+const [{ targetId }] = (await listPageTargets()).slice(-1)
 await session.use(targetId)
 
 // Switch: route calls to another existing tab
@@ -31,18 +34,19 @@ const { targetInfo } = await session.Target.getTargetInfo({ targetId })
 
 **`session.use` is CDP-side routing; `Target.activateTarget` is Chrome-side focus.** They are independent. If the user expects Chrome to visibly change, call `activateTarget` too.
 
-## Two things `Target.createTarget` quietly gets wrong
+## Why Space pages use `window.open`, not `Target.createTarget`
 
-1. **Race: `{ url }` in `createTarget` can resolve before navigation starts.** If you then poll `document.readyState`, you'll see `'complete'` for about:blank and move on. Safer:
+`Target.createTarget` bypasses Desktop's managed `WebContentsView` lifecycle.
+Open from an owned page instead so Desktop can attach the new page to the same
+Space, Profile, and visible-page switcher. For a controlled blank page:
    ```js
-   const { targetId } = await session.Target.createTarget({ url: 'about:blank' })
+   await page.evaluate(() => window.open('about:blank', '_blank'))
+   const [{ targetId }] = (await listPageTargets()).slice(-1)
    await session.use(targetId)
    await session.Page.enable()
    await session.Page.navigate({ url: 'https://example.com' })
-   // now wait for Page.loadEventFired via session.waitFor
+   await session.Target.activateTarget({ targetId })
    ```
-
-2. **New tab may open behind the active one.** Add `Target.activateTarget` if the user needs to see it.
 
 ## Visible tab-strip order (platform UI)
 

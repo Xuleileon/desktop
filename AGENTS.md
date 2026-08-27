@@ -31,3 +31,16 @@
   for CI/main drift detection.
 - Run `task db:schema:check` after touching `SessionDb` migrations.
 - Run `task db:schema:update` only after an intentional schema change.
+
+## Windows CDP and Harness Ownership
+
+- `AGB_CDP_PORT` is only a requested port, not proof that Chromium bound it.
+  Reject occupied and Windows-excluded ports before Electron starts, then
+  verify `/json/version` belongs to this exact Desktop instance before opening
+  auth sync or handing `BU_CDP_PORT` to any engine.
+- Never let a task start with an unverified, unreachable, or foreign CDP
+  endpoint. A clear preflight failure is safer than giving an agent access to
+  another Chrome profile or leaving it to loop on a dead port.
+- `browser-harness-js` is owned by one engine run. Preserve it across commands
+  within that run, but stop its per-session REPL when the engine exits so
+  reruns cannot accumulate detached Bun processes.

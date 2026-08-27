@@ -84,6 +84,24 @@ const DEFAULT_MAX_PORT = 65_535;
 /** Sanity cap so a broken port-probe doesn't spin forever; in practice
  *  the first random high-port attempt almost always succeeds. */
 const MAX_PORT_WALK = 500;
+let cachedWindowsExcludedTcpRanges: Array<{ start: number; end: number }> | null = null;
+
+/** Parse `netsh interface ipv4 show excludedportrange protocol=tcp` without
+ * depending on localized headings. Numeric range rows keep the same shape on
+ * every Windows language pack; an optional trailing `*` marks admin ranges. */
+export function parseWindowsExcludedPortRanges(output: string): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const line of output.split(/\r?\n/)) {
+    const match = /^\s*(\d+)\s+(\d+)(?:\s+\*)?\s*$/.exec(line);
+    if (!match) continue;
+    const start = Number(match[1]);
+    const end = Number(match[2]);
+    if (Number.isSafeInteger(start) && Number.isSafeInteger(end) && start >= 0 && end >= start && end <= 65_535) {
+      ranges.push({ start, end });
+    }
+  }
+  return ranges;
+}
 
 export interface ResolvedCdpPort {
   /**
@@ -104,6 +122,14 @@ export interface ResolvedCdpPort {
    *  0 means the random start port was free on first try. Used in startup logs
    *  to spot chronic collisions without needing a separate metric. */
   walkedFrom?: number;
+  /** Occupied explicit override that forced automatic recovery. */
+  requestedPort?: number;
+  requestedSource?: 'cli' | 'env';
+}
+
+export interface ResolveCdpPortOptions {
+  isPortFree?: (port: number) => boolean;
+  randomPort?: () => number;
 }
 
 /**
@@ -115,30 +141,41 @@ export interface ResolvedCdpPort {
  *   This avoids advertising a browser automation endpoint on the conventional
  *   Chrome debugging port unless a developer explicitly asks for that.
  */
-export function resolveCdpPort(argv: readonly string[]): ResolvedCdpPort {
+export function resolveCdpPort(
+  argv: readonly string[],
+  options: ResolveCdpPortOptions = {},
+): ResolvedCdpPort {
+  const portIsFree = options.isPortFree ?? isPortFreeSync;
+  const randomPort = options.randomPort ?? randomDefaultCdpPort;
+  let requestedPort: number | undefined;
+  let requestedSource: 'cli' | 'env' | undefined;
   const raw = extractFlagValue(argv, 'remote-debugging-port');
   if (raw !== null) {
     const n = Number.parseInt(raw, 10);
     if (Number.isFinite(n) && n >= 0 && n <= 65535 && String(n) === raw) {
-      return { port: n, source: 'cli' };
+      if (n === 0 || portIsFree(n)) return { port: n, source: 'cli' };
+      requestedPort = n;
+      requestedSource = 'cli';
     }
     // Fall through to env / random high-port selection on a bogus value rather than crashing.
   }
   const envVal = process.env.AGB_CDP_PORT;
-  if (envVal) {
+  if (envVal && requestedSource !== 'cli') {
     const n = Number.parseInt(envVal, 10);
     if (Number.isFinite(n) && n >= 0 && n <= 65535 && String(n) === envVal) {
-      return { port: n, source: 'env' };
+      if (n === 0 || portIsFree(n)) return { port: n, source: 'env' };
+      requestedPort = n;
+      requestedSource = 'env';
     }
   }
-  const startPort = randomDefaultCdpPort();
+  const startPort = randomPort();
   for (let i = 0; i < MAX_PORT_WALK; i++) {
     const p = DEFAULT_MIN_PORT + ((startPort - DEFAULT_MIN_PORT + i) % (DEFAULT_MAX_PORT - DEFAULT_MIN_PORT + 1));
-    if (isPortFreeSync(p)) {
-      return { port: p, source: 'random', walkedFrom: i };
+    if (portIsFree(p)) {
+      return { port: p, source: 'random', walkedFrom: i, requestedPort, requestedSource };
     }
   }
-  return { port: startPort, source: 'fallback' };
+  return { port: startPort, source: 'fallback', requestedPort, requestedSource };
 }
 
 function randomDefaultCdpPort(): number {
@@ -182,6 +219,19 @@ function isPortFreeSync(port: number): boolean {
 
   if (process.platform === 'win32') {
     try {
+      if (cachedWindowsExcludedTcpRanges === null) {
+        const excluded = spawnSync(
+          'netsh',
+          ['interface', 'ipv4', 'show', 'excludedportrange', 'protocol=tcp'],
+          { encoding: 'utf8', timeout: 2000 },
+        );
+        cachedWindowsExcludedTcpRanges = excluded.status === 0 && excluded.stdout
+          ? parseWindowsExcludedPortRanges(excluded.stdout)
+          : [];
+      }
+      if (cachedWindowsExcludedTcpRanges.some((range) => port >= range.start && port <= range.end)) {
+        return false;
+      }
       const res = spawnSync('netstat', ['-an'], { encoding: 'utf8', timeout: 2000 });
       if (res.status !== 0 || !res.stdout) return true;
       const needle = `:${port} `;

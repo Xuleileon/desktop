@@ -19,6 +19,7 @@ function spawnContext(): SpawnContext {
     prompt: 'Open example.com',
     harnessDir: '/tmp/harness',
     sessionId: '11111111-1111-4111-8111-111111111111',
+    providerSessionId: '22222222-2222-4222-8222-222222222222',
     targetId: 'target-1',
     cdpPort: 9222,
     model: 'openai-codex/gpt-5.6-sol',
@@ -43,10 +44,28 @@ describe('Pi adapter', () => {
     const prompt = value.wrapPrompt(ctx);
     expect(value.buildSpawnArgs(ctx, prompt)).toEqual([
       '--print', '--mode', 'json', '--approve',
-      '--session-id', ctx.sessionId,
+      '--session-id', ctx.providerSessionId!,
       '--model', 'openai-codex/gpt-5.6-sol',
     ]);
+    expect(value.buildSpawnArgs(ctx, prompt)).not.toContain(ctx.sessionId);
     expect(value.getStdinPayload?.(ctx, prompt)).toBe(prompt);
+    expect(prompt).toContain('always use `await listPageTargets()`');
+    expect(prompt).toContain('Whole-page text');
+    expect(prompt).toContain('assigning `.value` alone is not a committed form change');
+  });
+
+  it('resumes the captured Pi conversation instead of allocating the fresh provider id', () => {
+    const value = adapter();
+    const ctx = {
+      ...spawnContext(),
+      resumeSessionId: 'captured-pi-session',
+    };
+
+    expect(value.buildSpawnArgs(ctx, value.wrapPrompt(ctx))).toEqual([
+      '--print', '--mode', 'json', '--approve',
+      '--session', 'captured-pi-session',
+      '--model', 'openai-codex/gpt-5.6-sol',
+    ]);
   });
 
   it('translates session, tool and completion events', () => {

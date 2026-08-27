@@ -19,6 +19,18 @@ export const SKILL_DISCOVERY_AND_LIFECYCLE_LINES = [
 ];
 
 /**
+ * Provider-neutral browser transaction rules. Keep these in the short prompt
+ * because they protect the live user profile even when an interaction skill
+ * is not loaded.
+ */
+export const BROWSER_TRANSACTION_SAFETY_LINES = [
+  'Browser page discovery is asynchronous: always use `await listPageTargets()`. Before an action that may open a page, list existing targets; after it, list again and reuse the matching target instead of blindly repeating the click or navigating the root page over it.',
+  'Treat every browser mutation as a transaction. Perform one meaningful change, then verify the exact target field or control value. Prefer real focus/keyboard interaction (or a native value setter plus input/change events); assigning `.value` alone is not a committed form change. Whole-page text, a visible option in a picker, or a tool exit code is not proof that a form value was committed.',
+  'If a browser tool fails or times out, stop mutating the page and inspect the current targets and field values before retrying. Never replay a popup-opening click, form write, or upload merely because the previous command returned no output.',
+  'Do not guess business classifications, accounting fields, recipients, or other consequential values. Before an irreversible submit, send, purchase, delete, or publish action, summarize the exact values and wait for explicit user confirmation; after an authorized commit, reopen or read back the saved state.',
+];
+
+/**
  * Provider-neutral nudge that the renderer can surface structured content
  * (plans, comparisons, multi-step explanations, diffs, status reports) as
  * sandboxed HTML artifacts via ```html fenced blocks. The renderer

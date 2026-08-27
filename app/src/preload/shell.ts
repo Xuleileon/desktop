@@ -69,14 +69,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
   popup: createPopupBridge(),
-  takeover: {
-    show: (
-      sessionId: string,
-      bounds: { x: number; y: number; width: number; height: number },
-      mode?: 'idle' | 'active',
-    ): Promise<void> => ipcRenderer.invoke('takeover:show', sessionId, bounds, mode),
-    hide: (sessionId: string): Promise<void> => ipcRenderer.invoke('takeover:hide', sessionId),
-  },
   settings: {
     open: (payload?: { focusBrowserCodeProvider?: string }): Promise<void> => ipcRenderer.invoke('settings:open', payload),
     apiKey: {
@@ -339,6 +331,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const raw = await ipcRenderer.invoke('sessions:get-tabs', id);
       return validateTabs(raw);
     },
+    activatePage: (id: string, targetId: string): Promise<{ activated: boolean; reason?: string }> =>
+      ipcRenderer.invoke('sessions:tab-activate', id, targetId),
+    closePage: (id: string, targetId: string): Promise<{ closed: boolean; reason?: string }> =>
+      ipcRenderer.invoke('sessions:tab-close', id, targetId),
+    setPagePinned: (id: string, targetId: string, pinned: boolean): Promise<{ pinned: boolean; reason?: string }> =>
+      ipcRenderer.invoke('sessions:tab-pin', id, targetId, pinned),
     poolStats: async (): Promise<BrowserPoolStats> => {
       const raw = await ipcRenderer.invoke('sessions:pool-stats');
       return validatePoolStats(raw);
@@ -450,6 +448,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
       };
       ipcRenderer.on('sessions:browser-attached', handler);
       return () => ipcRenderer.removeListener('sessions:browser-attached', handler);
+    },
+    sessionTabsChanged: (cb: (id: string, tabs: TabInfo[]) => void): (() => void) => {
+      const handler = (_event: unknown, id: unknown, raw: unknown) => {
+        if (typeof id !== 'string') return;
+        try {
+          cb(id, validateTabs(raw));
+        } catch (err) {
+          console.error('[preload] sessionTabsChanged validation failed', err);
+        }
+      };
+      ipcRenderer.on('sessions:tabs-changed', handler);
+      return () => ipcRenderer.removeListener('sessions:tabs-changed', handler);
     },
     sessionOutput: (cb: (id: string, event: HlEvent) => void): (() => void) => {
       const handler = (_event: unknown, id: string, raw: unknown) => {

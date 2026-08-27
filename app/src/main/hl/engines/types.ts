@@ -16,6 +16,10 @@ export interface SpawnContext {
   harnessDir: string;
   /** App session id (used for naming uploads/outputs dirs + env injection). */
   sessionId: string;
+  /** Fresh provider-side conversation id allocated for this spawn. Engines
+   *  that accept caller-selected ids (currently Pi) must use this instead of
+   *  the Desktop resource session id when starting a new conversation. */
+  providerSessionId?: string;
   /** CDP target id for the browser view the agent must drive. */
   targetId: string;
   /** Port Electron exposes CDP on. */

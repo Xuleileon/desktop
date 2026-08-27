@@ -10,10 +10,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   extractFlagValue,
-  resolveUserDataDir,
-  resolveCdpPort,
-  setAnnouncedCdpPort,
   getAnnouncedCdpPort,
+  parseWindowsExcludedPortRanges,
+  resolveCdpPort,
+  resolveUserDataDir,
+  setAnnouncedCdpPort,
 } from '../../../src/main/startup/cli';
 
 // ---------------------------------------------------------------------------
@@ -111,6 +112,21 @@ describe('resolveUserDataDir (#206)', () => {
 const EPHEMERAL_MIN = 49152;
 const EPHEMERAL_MAX = 65535;
 
+describe('parseWindowsExcludedPortRanges', () => {
+  it('extracts dynamic and administered ranges without relying on localized headings', () => {
+    expect(parseWindowsExcludedPortRanges(`
+任意本地化标题
+Start Port    End Port
+----------    --------
+     50748       50847
+     50000       50059     *
+`)).toEqual([
+      { start: 50748, end: 50847 },
+      { start: 50000, end: 50059 },
+    ]);
+  });
+});
+
 describe('resolveCdpPort', () => {
   it('uses a random high port when no override is given', () => {
     // No CLI flag, no env -> avoid the conventional Chrome debugging port.
@@ -169,6 +185,42 @@ describe('resolveCdpPort', () => {
       const r = resolveCdpPort([]);
       expect(r.port).toBe(9227);
       expect(r.source).toBe('env');
+    } finally {
+      delete process.env.AGB_CDP_PORT;
+    }
+  });
+
+  it('recovers from an occupied AGB_CDP_PORT instead of advertising a dead endpoint', () => {
+    process.env.AGB_CDP_PORT = '9223';
+    try {
+      const r = resolveCdpPort([], {
+        randomPort: () => EPHEMERAL_MIN,
+        isPortFree: (port) => port !== 9223,
+      });
+      expect(r).toMatchObject({
+        port: EPHEMERAL_MIN,
+        source: 'random',
+        requestedPort: 9223,
+        requestedSource: 'env',
+      });
+    } finally {
+      delete process.env.AGB_CDP_PORT;
+    }
+  });
+
+  it('recovers from an occupied CLI port and does not fall back to the env override', () => {
+    process.env.AGB_CDP_PORT = '9227';
+    try {
+      const r = resolveCdpPort(['--remote-debugging-port=9223'], {
+        randomPort: () => EPHEMERAL_MIN + 1,
+        isPortFree: (port) => port !== 9223,
+      });
+      expect(r).toMatchObject({
+        port: EPHEMERAL_MIN + 1,
+        source: 'random',
+        requestedPort: 9223,
+        requestedSource: 'cli',
+      });
     } finally {
       delete process.env.AGB_CDP_PORT;
     }

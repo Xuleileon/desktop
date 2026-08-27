@@ -1,6 +1,6 @@
 ---
 name: cdp
-description: Drive Browser Use Desktop's assigned Chromium target via the DevTools Protocol from JavaScript. Run snippets through the bundled `browser-harness-js` CLI; it auto-spawns a long-lived Bun HTTP server holding a CDP `Session`, and every call executes against the same persistent connection.
+description: Drive Browser Use Desktop's conversation-scoped Chromium Space via the DevTools Protocol from JavaScript. Run snippets through the bundled `browser-harness-js` CLI; it auto-spawns a long-lived Bun HTTP server holding a CDP `Session`, and every call executes against the same persistent connection.
 ---
 
 # CDP — `browser-harness-js` skill
@@ -11,7 +11,7 @@ Browser Use Desktop bundles the runtime under `./browser-harness-js/sdk/` and pu
 
 ## First use in Browser Use Desktop
 
-Connect to the app-assigned target before page-level calls:
+Connect to the app-assigned Space root before page-level calls:
 
 ```bash
 browser-harness-js 'await connectToAssignedTarget()'
@@ -50,7 +50,7 @@ Detect failure with `if browser-harness-js '...'; then ...; else handle_error; f
 
 ```bash
 browser-harness-js <<'EOF'
-const tabs = await listPageTargets(); // the assigned target only in Browser Use Desktop
+const tabs = await listPageTargets(); // every page in this conversation Space
 return globalThis.tid;
 EOF
 ```
@@ -67,14 +67,14 @@ EOF
 | `browser-harness-js --restart`  | Stop + start fresh. |
 | `browser-harness-js --logs`     | `tail -f` the server log (`/tmp/browser-harness-js.log`). |
 
-Env vars: `CDP_REPL_PORT` (default `9876`), `CDP_REPL_LOG` (default `/tmp/browser-harness-js.log`).
+Env vars: `CDP_REPL_PORT` (default `9876`), `CDP_REPL_LOG` (default `/tmp/browser-harness-js.log`), `CDP_CALL_TIMEOUT_MS` (per-CDP-call, default `30000`), and `CDP_EVAL_TIMEOUT_MS` (whole snippet, default `60000`). A timed-out snippet recycles its per-conversation REPL so unfinished calls and globals cannot leak into the next command.
 
 ## API surface inside snippets
 
 These globals are pre-loaded — no imports needed:
 
 - `session` — the persistent `Session`. Has every CDP domain mounted: `session.Page`, `session.DOM`, `session.Runtime`, `session.Network`, … 56 domains, 652 methods total.
-- `listPageTargets()` — in Browser Use Desktop, returns only the target assigned to the current conversation. No args — uses the connected session.
+- `listPageTargets()` — **async; always use `await listPageTargets()`**. In Browser Use Desktop it returns every page opened inside the current conversation Space and hides all other conversations. No args — uses the connected session. Synchronous `.find`, `Object.values`, spread, or `JSON.stringify` fails with an explicit missing-`await` error.
 - `detectBrowsers()` — scan OS-specific profile dirs for running Chromium-based browsers with remote debugging on. Returns `[{name, profileDir, port, wsPath, wsUrl, mtimeMs}]`, sorted by most recently launched.
 - `resolveWsUrl(opts)` — resolve a WS URL from `{wsUrl}` | `{port, host?}` | `{profileDir}`. For the no-args auto-detect flow, call `session.connect()` directly instead.
 - `CDP` — the generated namespaces (`CDP.Page`, `CDP.Runtime`, …) for type-name reference.
