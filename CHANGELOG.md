@@ -4,6 +4,19 @@ All notable changes to the Agentic Browser project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.0.50] - 2026-08-27
+
+### Fixed
+
+- **Native copy for selected text** — selecting text in the app could only be quoted, never copied. Two independent paths were broken at once: renderer keydown listeners bound `Ctrl+C` to pause/cancel and swallowed the event whenever focus sat outside an input, and Electron ships no default context menu, so right-click offered nothing either. A shared guard now yields to the browser whenever a real selection is being copied, and app UI windows gained a standard edit context menu. Automation-driven browser views are deliberately excluded so agent page interaction is never blocked by a native popup.
+
+### Verification
+
+- TypeScript typecheck passed and ESLint reported no errors on the changed files.
+- Window creation suites (`logsPill`, `pillWindow`) pass; the remaining unit failures are pre-existing POSIX path assumptions that fail on Windows and are unrelated to this change.
+
+**Package delta:** Desktop `0.0.49..0.0.50`; renderer shortcut handling and main-process context menus only, no session or schema changes.
+
 ## [0.0.49] - 2026-08-27
 
 ### Fixed
