@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TerminalPane } from '../hub/TerminalPane';
 import { closeAppPopup, openAnchoredAppPopup } from '../shared/appPopup';
+import { shouldYieldToNativeEdit } from '../../shared/nativeEditKeys';
 
 declare global {
   interface Window {
@@ -290,6 +291,7 @@ export function LogsApp(): React.ReactElement {
       const sessionIsRunning = sessionStatus === 'running' || sessionStatus === 'stuck';
       const sessionIsPaused = sessionStatus === 'paused';
       if (e.key.toLowerCase() === 'c' && e.ctrlKey && !e.metaKey && !e.altKey && sessionId && (sessionIsRunning || sessionIsPaused)) {
+        if (shouldYieldToNativeEdit(e)) return;
         e.preventDefault();
         const action = sessionIsPaused
           ? window.electronAPI?.sessions.cancel(sessionId)

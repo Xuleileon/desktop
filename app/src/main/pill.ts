@@ -20,6 +20,7 @@ import { isIgnorableRendererMessage } from '../shared/rendererNoise';
 import path from 'node:path';
 import type { AgentEvent } from '../shared/types';
 import { mainLogger, rendererLogger } from './logger';
+import { attachEditContextMenu } from './contextMenu';
 
 // ---------------------------------------------------------------------------
 // Scoped logger shim — delegates to mainLogger with component prefix
@@ -311,6 +312,10 @@ export function createPillWindow(): BrowserWindow {
 
   pillWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   pillWindow.setAlwaysOnTop(true, 'screen-saver');
+
+  // Electron has no default context menu — attach ours so the command input
+  // supports right-click Paste/Copy.
+  attachEditContextMenu(pillWindow.webContents);
 
   // Load the pill renderer
   if (

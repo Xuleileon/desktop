@@ -8,6 +8,7 @@
 import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
 import { mainLogger, rendererLogger } from './logger';
+import { attachEditContextMenu } from './contextMenu';
 import { registerViteDepStaleHeal } from './viteDepStaleHeal';
 import { getWindowBackgroundColor } from './themeMode';
 import { isIgnorableRendererMessage } from '../shared/rendererNoise';
@@ -234,6 +235,10 @@ export function createLogsWindow(): BrowserWindow {
     },
   });
   applyLogsWindowStatePolicy(logsWindow);
+
+  // Electron ships no default context menu; attach ours so terminal output
+  // and the follow-up textarea support right-click Copy/Paste.
+  attachEditContextMenu(logsWindow.webContents);
 
   // User-drag resize/move detection — once the user manually changes bounds,
   // stop auto-repositioning. A mode-switch or explicit show resets the flag.

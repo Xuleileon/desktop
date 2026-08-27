@@ -12,6 +12,7 @@
 import path from 'node:path';
 import { BrowserWindow } from 'electron';
 import { mainLogger, rendererLogger } from '../logger';
+import { attachEditContextMenu } from '../contextMenu';
 import { isIgnorableRendererMessage } from '../../shared/rendererNoise';
 
 // Forge VitePlugin injects these globals at build time.
@@ -41,6 +42,10 @@ export function createOnboardingWindow(): BrowserWindow {
       sandbox: true,
     },
   });
+
+  // Electron has no default context menu — attach ours so onboarding forms
+  // support right-click Copy/Paste (API keys etc.).
+  attachEditContextMenu(win.webContents);
 
   // Show window once renderer is painted
   win.once('ready-to-show', () => {

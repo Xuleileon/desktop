@@ -10,6 +10,7 @@ import {
   rendererToAccelerator,
   shortcutToRenderer,
 } from '../../shared/hotkeys';
+import { shouldYieldToNativeEdit } from '../../shared/nativeEditKeys';
 
 export interface VimKeysReturn {
   chordPrefix: string | null;
@@ -79,8 +80,7 @@ export function useVimKeys(handlers: Partial<Record<ActionId, () => void>>): Vim
         return;
       }
 
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+      if (shouldYieldToNativeEdit(e)) return;
 
       const combo = chordPrefix ? `${chordPrefix} ${pressed}` : pressed;
 

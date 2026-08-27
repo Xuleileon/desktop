@@ -10,6 +10,7 @@ import opencodeLogoDark from './opencode-logo-dark.svg';
 import opencodeLogoLight from './opencode-logo-light.svg';
 import { useThemedAsset } from '../design/useThemedAsset';
 import { closeAppPopup, openAnchoredAppPopup } from '../shared/appPopup';
+import { shouldYieldToNativeEdit } from '../../shared/nativeEditKeys';
 import type { AgentSession, OutputEntry } from './types';
 import { useI18n } from './i18n';
 import { BrowserTabStrip } from './BrowserTabStrip';
@@ -962,6 +963,7 @@ export function AgentPane({ session, focused, onRerun, onResume, onPause, onFoll
     if (!focused || (!isRunningLike && !isPaused) || (!onPause && !onCancel)) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.key.toLowerCase() !== 'c' || !e.ctrlKey || e.metaKey || e.altKey) return;
+      if (shouldYieldToNativeEdit(e)) return;
       e.preventDefault();
       e.stopPropagation();
       if (isPaused) {

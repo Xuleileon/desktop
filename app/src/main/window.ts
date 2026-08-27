@@ -7,6 +7,7 @@ import { BrowserWindow, app, screen } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { mainLogger, rendererLogger } from './logger';
+import { attachEditContextMenu } from './contextMenu';
 import { registerViteDepStaleHeal } from './viteDepStaleHeal';
 import { getWindowBackgroundColor, getWcoSymbolColor } from './themeMode';
 import { isIgnorableRendererMessage } from '../shared/rendererNoise';
@@ -116,6 +117,10 @@ export function createShellWindow(opts?: ShellWindowOptions): BrowserWindow {
       sandbox: true,
     },
   });
+
+  // Electron has no built-in context menu — without this, right-clicking a
+  // text selection in the hub does nothing (no Copy).
+  attachEditContextMenu(win.webContents);
 
   if (titleSuffix) {
     win.setTitle(win.getTitle() + titleSuffix);
