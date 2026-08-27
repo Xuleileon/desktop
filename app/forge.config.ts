@@ -56,8 +56,11 @@ const runNpm = (args: string[], cwd: string): void => {
   execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, { cwd, stdio: 'inherit' });
 };
 
+// Keyed on a lock file whenever one exists: package.json is only a fallback
+// because its version field changes every release, which would orphan a
+// several-hundred-MB cache entry on every bump without any dependency change.
 function packageDepsCacheDir(electronVersion: string): string {
-  const lockPath = ['package-lock.json', 'bun.lock', 'npm-shrinkwrap.json']
+  const lockPath = ['package-lock.json', 'bun.lock', 'npm-shrinkwrap.json', 'yarn.lock']
     .map((name) => path.resolve(__dirname, name))
     .find((candidate) => fs.existsSync(candidate)) ?? path.resolve(__dirname, 'package.json');
   const lockHash = createHash('sha256').update(fs.readFileSync(lockPath)).digest('hex').slice(0, 16);
